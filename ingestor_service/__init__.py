@@ -1,0 +1,2 @@
+"""Ingestor service package."""
+

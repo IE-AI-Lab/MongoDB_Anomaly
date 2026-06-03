@@ -1,0 +1,30 @@
+# Secrets and local config
+.env
+.env.local
+.env.*.local
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local notes and large reference assets (optional in repo)
+note.txt
+DATABASE_REPORT.pdf
+
+# Cursor / canvas artifacts (local only)
+canvases/
+*.canvas.status.json
