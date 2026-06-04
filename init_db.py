@@ -54,7 +54,7 @@ def collection_exists(db: Database[dict[str, Any]], collection_name: str) -> boo
     return collection_name in db.list_collection_names()
 
 
-def create_time_series_collection(db: Database[dict[str, Any]]) -> None:
+def create_time_series_collection(db: Database[dict[str, Any]], ttl_seconds: int) -> None:
     # telemetry_history document contract:
     # {
     #     "_id": ObjectId,
@@ -91,6 +91,9 @@ def create_time_series_collection(db: Database[dict[str, Any]]) -> None:
                 "metaField": "sensor_id",
                 "granularity": "seconds",
             },
+            # Time-series retention is set at the collection level. MongoDB
+            # expires a bucket once all its documents are older than this.
+            expireAfterSeconds=ttl_seconds,
         )
         print("Created time-series collection: telemetry_history")
     except CollectionInvalid:
@@ -233,22 +236,19 @@ def ensure_standard_collections(db: Database[dict[str, Any]]) -> None:
         print(f"Created collection: {collection_name}")
 
 
-def ensure_ttl_indexes(db: Database[dict[str, Any]]) -> None:
+def ensure_timeseries_ttl(db: Database[dict[str, Any]], ttl_seconds: int) -> None:
     """
-    Retention policy:
-    - telemetry_history is retained for 7 days to cap storage growth.
+    Retention policy for telemetry_history.
+
+    Time-series collections expire data via the collection-level
+    expireAfterSeconds option, set when the collection is created. This applies
+    (or updates) it for an already-existing collection via collMod, so reruns
+    and TTL changes take effect without recreating the collection.
 
     Note: MongoDB TTL is best-effort and typically runs roughly once per minute.
     """
-    telemetry: Collection[dict[str, Any]] = db["telemetry_history"]
-    # Time-series TTL has an extra constraint: MongoDB requires a partialFilterExpression
-    # on the time-series metaField (sensor_id in our case).
-    telemetry.create_index(
-        [("timestamp_utc", ASCENDING)],
-        expireAfterSeconds=60 * 60 * 24 * 7,
-        partialFilterExpression={"sensor_id": {"$exists": True}},
-    )
-    print("Ensured TTL index on telemetry_history.timestamp_utc (7 days)")
+    db.command("collMod", "telemetry_history", expireAfterSeconds=ttl_seconds)
+    print(f"Ensured telemetry_history TTL (expireAfterSeconds={ttl_seconds})")
 
 
 def create_indexes(db: Database[dict[str, Any]]) -> None:
@@ -269,7 +269,6 @@ def create_indexes(db: Database[dict[str, Any]]) -> None:
     knowledge_base.create_index([("document_id", ASCENDING)], unique=True)
     knowledge_base.create_index([("equipment_type", ASCENDING)])
     knowledge_base.create_index([("associated_error_codes", ASCENDING)])
-    knowledge_base.create_index([("source_type", ASCENDING)])
 
     staff_on_call: Collection[dict[str, Any]] = db["staff_on_call"]
     # Earlier versions used handled_severity_types as an array. Normalize to a
@@ -707,9 +706,10 @@ def main() -> None:
         client.admin.command("ping")
         db = client[db_name]
 
-        create_time_series_collection(db)
+        ttl_seconds = 60 * 60 * 24 * svc_config.telemetry_ttl_days()
+        create_time_series_collection(db, ttl_seconds)
         ensure_standard_collections(db)
-        ensure_ttl_indexes(db)
+        ensure_timeseries_ttl(db, ttl_seconds)
         create_indexes(db)
         seed_system_metadata(db)
         seed_staff_on_call(db)

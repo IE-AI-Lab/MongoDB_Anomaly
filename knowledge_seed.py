@@ -10,13 +10,20 @@ Metric types follow the existing enum: environment, vibration, pressure, flow.
 NOTE: associated_error_codes here should intersect the codes the detector emits
 (see ingestor_service/detector/detect.py _error_code) so search_knowledge's
 error_code filter can join anomalies to docs.
+
+NOTE: equipment_type values must match the seeded sensor fleet's equipment_type
+(see init_db.py seed_sensors): packaging_room, control_room, centrifugal_pump,
+conveyor_motor, hydraulic_line, coolant_loop. This is the join key for
+search_knowledge's equipment_type filter — every sensor type below has at least
+one matching active doc. error_code remains the primary join; equipment_type is
+a scoping filter on top of it.
 """
 
 KNOWLEDGE_SEED: list[dict] = [
     # --- environment (temperature / humidity) ---
     {
         "section_title": "High temperature on industrial chiller loop",
-        "equipment_type": "chiller",
+        "equipment_type": "packaging_room",
         "associated_error_codes": ["TEMP_HIGH", "COOLING_FAULT"],
         "text_content": (
             "When chiller outlet temperature exceeds the setpoint by more than 10%, "
@@ -28,7 +35,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "Server-room humidity rising above 60%",
-        "equipment_type": "hvac_unit",
+        "equipment_type": "control_room",
         "associated_error_codes": ["HUMIDITY_HIGH"],
         "text_content": (
             "Humidity drift above 60% in conditioned space is most often a stuck "
@@ -39,7 +46,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "Simultaneous temperature rise across multiple sensors",
-        "equipment_type": "facility",
+        "equipment_type": "packaging_room",
         "associated_error_codes": ["TEMP_HIGH"],
         "text_content": (
             "If several environment sensors trend up at the same time, suspect a "
@@ -63,7 +70,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "Motor vibration spike during start-up",
-        "equipment_type": "electric_motor",
+        "equipment_type": "conveyor_motor",
         "associated_error_codes": ["VIBRATION_HIGH", "MISALIGNMENT"],
         "text_content": (
             "A vibration spike on motor start-up that settles within 30 seconds is "
@@ -74,7 +81,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "Fan vibration after blade cleaning or replacement",
-        "equipment_type": "industrial_fan",
+        "equipment_type": "conveyor_motor",
         "associated_error_codes": ["VIBRATION_HIGH", "IMBALANCE"],
         "text_content": (
             "New vibration on a fan after cleaning or blade replacement is almost "
@@ -86,7 +93,7 @@ KNOWLEDGE_SEED: list[dict] = [
     # --- pressure ---
     {
         "section_title": "Hydraulic system pressure drop below threshold",
-        "equipment_type": "hydraulic_unit",
+        "equipment_type": "hydraulic_line",
         "associated_error_codes": ["PRESSURE_LOW", "LEAK_SUSPECTED"],
         "text_content": (
             "Hydraulic pressure dropping below the configured minimum while load "
@@ -97,7 +104,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "Pneumatic main line pressure spikes",
-        "equipment_type": "compressor",
+        "equipment_type": "hydraulic_line",
         "associated_error_codes": ["PRESSURE_HIGH"],
         "text_content": (
             "Repeated pressure spikes above setpoint on a pneumatic main line "
@@ -108,7 +115,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "Slow pressure rise after compressor start",
-        "equipment_type": "compressor",
+        "equipment_type": "hydraulic_line",
         "associated_error_codes": ["PRESSURE_LOW", "LEAK_SUSPECTED"],
         "text_content": (
             "If a compressor takes much longer than baseline to build pressure, "
@@ -120,7 +127,7 @@ KNOWLEDGE_SEED: list[dict] = [
     # --- flow ---
     {
         "section_title": "Coolant flow dropping below minimum",
-        "equipment_type": "coolant_system",
+        "equipment_type": "coolant_loop",
         "associated_error_codes": ["FLOW_LOW", "FILTER_CLOGGED"],
         "text_content": (
             "Falling coolant flow with stable pump speed almost always means a "
@@ -131,7 +138,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "Flow oscillation on supply line",
-        "equipment_type": "pump",
+        "equipment_type": "coolant_loop",
         "associated_error_codes": ["FLOW_OSCILLATION"],
         "text_content": (
             "Oscillating flow readings (cycling above and below setpoint) "
@@ -142,7 +149,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "Flow drops while pressure stays normal",
-        "equipment_type": "process_line",
+        "equipment_type": "coolant_loop",
         "associated_error_codes": ["FLOW_LOW"],
         "text_content": (
             "Decreasing flow with steady pressure is a classic signature of "
@@ -153,7 +160,7 @@ KNOWLEDGE_SEED: list[dict] = [
     # --- cross-cutting ---
     {
         "section_title": "Combined vibration + temperature rise on motor",
-        "equipment_type": "electric_motor",
+        "equipment_type": "conveyor_motor",
         "associated_error_codes": ["VIBRATION_HIGH", "TEMP_HIGH", "BEARING_WEAR"],
         "text_content": (
             "When vibration and temperature both trend up on the same motor over "

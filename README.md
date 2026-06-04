@@ -111,6 +111,16 @@ python -m simulator_service.main --base-url http://localhost:8000 --deterministi
 
 Interactive API docs at `http://localhost:8000/docs`.
 
+### 6. Tests
+
+Pure-logic unit tests (severity, thresholds, detector) — no DB or API keys
+needed:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
 ---
 
 ## Anomaly lifecycle
@@ -122,6 +132,13 @@ unresolved ──(agent PATCH)──▶ analyzed ──(manager assign)──▶
    ▲ detector creates it                                                                       │
                                                           outcome="fixed" ──▶ knowledge_base (is_active=false, awaits curation)
 ```
+
+Enforced by the write API (invalid moves return `409`):
+- `PATCH` may only set `status` to `unresolved`/`analyzed`; it **cannot** set
+  `assigned` or `resolved` (those carry side effects — use the dedicated
+  endpoints) and cannot move a status backward.
+- `assign` rejects an already-`assigned` or `resolved` anomaly.
+- `resolve` rejects an already-`resolved` anomaly. `resolved` is terminal.
 
 ---
 
