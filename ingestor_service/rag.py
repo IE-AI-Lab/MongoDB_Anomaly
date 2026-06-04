@@ -95,16 +95,27 @@ def search_knowledge(
                 "filter": pre_filter,
             }
         },
-        {"$project": {"text_embedding": 0}},
+        {"$project": {"text_embedding": 0, "_id": 0}},
     ]
 
     try:
-        return list(knowledge_base.aggregate(pipeline))
+        results = list(knowledge_base.aggregate(pipeline))
+        if results:
+            return results
+        # Atlas returns an empty result set (no error) when the vector index
+        # does not exist yet — so empty also means "fall back", not just
+        # exceptions. With a live index, top-k similarity always returns docs.
+        log.warning(
+            "vector search returned 0 docs — index '%s' likely missing; "
+            "falling back to filtered date sort",
+            "knowledge_vector",
+        )
     except Exception as e:
         log.warning("vector search failed (%s) — falling back to filtered date sort", e)
-        cursor = (
-            knowledge_base.find(pre_filter, {"text_embedding": 0})
-            .sort("ingested_at_utc", -1)
-            .limit(k)
-        )
-        return list(cursor)
+
+    cursor = (
+        knowledge_base.find(pre_filter, {"text_embedding": 0, "_id": 0})
+        .sort("ingested_at_utc", -1)
+        .limit(k)
+    )
+    return list(cursor)
