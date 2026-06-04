@@ -55,3 +55,56 @@ def service_name() -> str:
     """Used for audit fields like last_updated_by or event source labels."""
     return os.getenv("SERVICE_NAME", "ingestor_service")
 
+
+# --- Embeddings: Google Gemini (free tier) -----------------------------------
+# Groq has no embeddings endpoint, so embeddings come from Gemini while chat
+# comes from Groq (see below). The vector index in Atlas must match
+# embed_dimensions().
+
+
+def google_api_key() -> str:
+    """
+    Google AI Studio API key for Gemini embeddings.
+
+    Optional at startup: returns "" when unset so the service can boot without
+    RAG configured. rag.py raises a clear error only when an embedding is
+    actually requested without a key.
+    """
+    return os.getenv("GOOGLE_API_KEY", "")
+
+
+def embed_model() -> str:
+    """Gemini embedding model. gemini-embedding-001 supports Matryoshka
+    truncation to embed_dimensions() (768/1536/3072)."""
+    return os.getenv("EMBED_MODEL", "gemini-embedding-001")
+
+
+def embed_dimensions() -> int:
+    """
+    Embedding vector dimensionality.
+
+    Must match the Atlas vector index (step 03) and every stored
+    text_embedding. text-embedding-004 = 768.
+    """
+    return int(os.getenv("EMBED_DIMENSIONS", "768"))
+
+
+# --- Chat / agent reasoning: Groq (OpenAI-compatible endpoint) ----------------
+# The agent team points an OpenAI-SDK client at groq_base_url() with
+# groq_api_key() to use Groq's free Llama/Mixtral/Gemma models.
+
+
+def groq_api_key() -> str:
+    """Groq API key (OpenAI-compatible). Optional at startup."""
+    return os.getenv("GROQ_API_KEY", "")
+
+
+def groq_base_url() -> str:
+    """Groq's OpenAI-compatible base URL."""
+    return os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+
+
+def chat_model() -> str:
+    """Chat model used by the agent team's reasoning layer."""
+    return os.getenv("CHAT_MODEL", "llama-3.3-70b-versatile")
+
