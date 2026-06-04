@@ -22,6 +22,14 @@ from .feedback_to_knowledge import embed_resolution_into_knowledge
 router = APIRouter(tags=["write"])
 
 
+# Anomaly status lifecycle: unresolved -> analyzed -> assigned -> resolved.
+# These ranks let us enforce forward-only transitions. `assigned` and `resolved`
+# are reachable ONLY through their dedicated endpoints (which carry side effects:
+# flipping staff on-call state and closing the RAG loop), never via a raw PATCH.
+VALID_STATUSES: tuple[str, ...] = ("unresolved", "analyzed", "assigned", "resolved")
+_STATUS_RANK: dict[str, int] = {s: i for i, s in enumerate(VALID_STATUSES)}
+
+
 def _strip_mongo_id(doc: dict[str, Any]) -> dict[str, Any]:
     doc.pop("_id", None)
     return doc
@@ -46,12 +54,29 @@ def patch_anomaly(anomaly_id: str, patch: AnalysisPatch) -> dict[str, Any]:
     update = {k: v for k, v in patch.model_dump().items() if v is not None}
     if not update:
         raise HTTPException(400, "no fields to update")
-    update["updated_at_utc"] = datetime.now(timezone.utc)
 
-    res = col("anomalies").update_one({"anomaly_id": anomaly_id}, {"$set": update})
-    if res.matched_count == 0:
+    current = col("anomalies").find_one({"anomaly_id": anomaly_id})
+    if not current:
         raise HTTPException(404, "anomaly not found")
 
+    new_status = update.get("status")
+    if new_status is not None:
+        cur_status = current.get("status", "unresolved")
+        if new_status not in _STATUS_RANK:
+            raise HTTPException(400, f"invalid status '{new_status}'; must be one of {VALID_STATUSES}")
+        if new_status in ("assigned", "resolved"):
+            raise HTTPException(
+                409,
+                f"cannot set status '{new_status}' via PATCH — use "
+                f"POST /anomalies/{{id}}/assign or /resolve (they carry side effects)",
+            )
+        if cur_status == "resolved":
+            raise HTTPException(409, "anomaly is resolved (terminal); cannot change status")
+        if _STATUS_RANK[new_status] < _STATUS_RANK[cur_status]:
+            raise HTTPException(409, f"cannot move status backward: {cur_status} -> {new_status}")
+
+    update["updated_at_utc"] = datetime.now(timezone.utc)
+    col("anomalies").update_one({"anomaly_id": anomaly_id}, {"$set": update})
     return _strip_mongo_id(col("anomalies").find_one({"anomaly_id": anomaly_id}))
 
 
@@ -70,6 +95,16 @@ def assign_anomaly(anomaly_id: str, req: AssignRequest) -> dict[str, Any]:
     anomaly = col("anomalies").find_one({"anomaly_id": anomaly_id})
     if not anomaly:
         raise HTTPException(404, "anomaly not found")
+
+    cur_status = anomaly.get("status", "unresolved")
+    if cur_status == "resolved":
+        raise HTTPException(409, "anomaly is resolved (terminal); cannot assign")
+    if cur_status == "assigned":
+        raise HTTPException(
+            409,
+            f"anomaly already assigned to {anomaly.get('assigned_to_employee_id')}",
+        )
+
     staff = col("staff_on_call").find_one({"employee_id": req.employee_id})
     if not staff:
         raise HTTPException(404, "employee not found")
@@ -108,6 +143,8 @@ def resolve_anomaly(anomaly_id: str, req: ResolveRequest) -> dict[str, Any]:
     anomaly = col("anomalies").find_one({"anomaly_id": anomaly_id})
     if not anomaly:
         raise HTTPException(404, "anomaly not found")
+    if anomaly.get("status") == "resolved":
+        raise HTTPException(409, "anomaly is already resolved")
 
     resolver = req.resolved_by or anomaly.get("assigned_to_employee_id")
 

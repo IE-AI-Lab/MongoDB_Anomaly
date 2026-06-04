@@ -8,14 +8,18 @@ This uses synchronous PyMongo for simplicity. For high concurrency you'd typical
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import certifi
 from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
+from pymongo.errors import OperationFailure
 
 from . import config
+
+log = logging.getLogger(__name__)
 
 
 _client: MongoClient[dict[str, Any]] | None = None
@@ -59,14 +63,19 @@ def ensure_indexes() -> None:
     """
     db = get_db()
 
-    # telemetry retention: keep 7 days
+    # telemetry retention: keep N days. For TIME-SERIES collections, expiry is
+    # configured at the collection level via expireAfterSeconds (collMod), NOT
+    # via a secondary TTL index on the timeField — the latter is rejected or
+    # silently ineffective on most MongoDB/Atlas versions. collMod is idempotent;
+    # we guard it so a missing collection (init_db not yet run) doesn't crash
+    # startup.
     ttl_seconds = 60 * 60 * 24 * config.telemetry_ttl_days()
-    # Time-series TTL requires a partialFilterExpression on the metaField (sensor_id).
-    db["telemetry_history"].create_index(
-        [("timestamp_utc", ASCENDING)],
-        expireAfterSeconds=ttl_seconds,
-        partialFilterExpression={"sensor_id": {"$exists": True}},
-    )
+    try:
+        db.command("collMod", "telemetry_history", expireAfterSeconds=ttl_seconds)
+    except OperationFailure as exc:
+        log.warning(
+            "could not set telemetry_history TTL (run init_db.py first?): %s", exc
+        )
 
     db["anomalies"].create_index([("anomaly_id", ASCENDING)], unique=True)
     db["anomalies"].create_index(
@@ -94,7 +103,10 @@ def ensure_indexes() -> None:
     )
 
     db["knowledge_base"].create_index([("document_id", ASCENDING)], unique=True)
-    db["knowledge_base"].create_index([("source_type", ASCENDING)])
+    # Filters used by rag.search_knowledge's $vectorSearch pre-filter and the
+    # recency fallback. (No source_type index — no document carries that field.)
+    db["knowledge_base"].create_index([("equipment_type", ASCENDING)])
+    db["knowledge_base"].create_index([("associated_error_codes", ASCENDING)])
 
     db["sensors"].create_index([("sensor_id", ASCENDING)], unique=True)
     db["sensors"].create_index([("is_active", ASCENDING), ("metric_type", ASCENDING)])
