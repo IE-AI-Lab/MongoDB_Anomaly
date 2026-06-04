@@ -21,6 +21,10 @@ from pymongo.collection import Collection
 from pymongo.database import Database
 from pymongo.errors import CollectionInvalid, OperationFailure, PyMongoError
 
+from ingestor_service import config as svc_config
+from ingestor_service.rag import embed
+from knowledge_seed import KNOWLEDGE_SEED
+
 
 STANDARD_COLLECTIONS = (
     "anomalies",
@@ -649,6 +653,44 @@ def seed_sensors(db: Database[dict[str, Any]]) -> None:
         )
 
 
+def seed_knowledge_base(db: Database[dict[str, Any]]) -> None:
+    """
+    Upsert seed knowledge entries with fresh embeddings. Idempotent.
+
+    Embeddings come from Gemini (config.embed_model / embed_dimensions) — this
+    requires GOOGLE_API_KEY to be set. Each entry is keyed by a stable
+    document_id so reruns refresh embeddings without creating duplicates.
+    """
+    collection: Collection[dict[str, Any]] = db["knowledge_base"]
+    now = utc_now()
+
+    for i, entry in enumerate(KNOWLEDGE_SEED):
+        doc_id = f"seed-{i:03d}"
+        text = entry["text_content"]
+        vec = embed(text)
+        collection.replace_one(
+            {"document_id": doc_id},
+            {
+                "document_id": doc_id,
+                "source_file": "knowledge_seed.py:KNOWLEDGE_SEED",
+                "page_number": None,
+                "section_title": entry["section_title"],
+                "equipment_type": entry["equipment_type"],
+                "associated_error_codes": entry["associated_error_codes"],
+                "text_content": text,
+                "text_embedding": vec,
+                "embedding_model": svc_config.embed_model(),
+                "embedding_dimensions": svc_config.embed_dimensions(),
+                "chunk_index": 0,
+                "is_active": True,
+                "ingested_at_utc": now,
+                "schema_version": 1,
+            },
+            upsert=True,
+        )
+        print(f"Seeded knowledge_base.{doc_id}")
+
+
 def main() -> None:
     load_dotenv()
 
@@ -672,6 +714,7 @@ def main() -> None:
         seed_system_metadata(db)
         seed_staff_on_call(db)
         seed_sensors(db)
+        seed_knowledge_base(db)
 
         print(f"MongoDB initialization complete for database: {db_name}")
     except PyMongoError as exc:
