@@ -34,7 +34,7 @@ def _load_global_threshold(metric_name: str) -> dict[str, Any] | None:
     """
     Load the system_metadata anomaly_thresholds document for a metric.
 
-    Schema shape is intentionally flexible; we support the seeded keys from init_db.py.
+    Schema shape is intentionally flexible; we support the seeded keys from scripts/init_db.py.
     """
     return col("system_metadata").find_one(
         {"config_type": "anomaly_thresholds", "target_metric": metric_name, "is_enabled": True}

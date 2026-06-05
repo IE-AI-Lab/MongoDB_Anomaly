@@ -74,7 +74,7 @@ def ensure_indexes() -> None:
         db.command("collMod", "telemetry_history", expireAfterSeconds=ttl_seconds)
     except OperationFailure as exc:
         log.warning(
-            "could not set telemetry_history TTL (run init_db.py first?): %s", exc
+            "could not set telemetry_history TTL (run python -m scripts.init_db first?): %s", exc
         )
 
     db["anomalies"].create_index([("anomaly_id", ASCENDING)], unique=True)

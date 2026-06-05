@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from severity_engine import (
+from ingestor_service.severity_engine import (
     breach_ratio,
     build_anomaly_severity_fields,
     compute_severity,

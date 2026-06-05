@@ -69,10 +69,10 @@ pip install -r requirements.txt
 ### 3. Initialize the database
 
 Creates collections + indexes, seeds thresholds/staff/sensors, and embeds the
-14-entry knowledge corpus (`knowledge_seed.py`) into `knowledge_base`:
+14-entry knowledge corpus (`scripts/knowledge_seed.py`) into `knowledge_base`:
 
 ```bash
-python init_db.py
+python -m scripts.init_db
 ```
 
 ### 4. Create the Atlas Vector Search index (one-time, manual)
@@ -117,9 +117,11 @@ Pure-logic unit tests (severity, thresholds, detector) — no DB or API keys
 needed:
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements.txt -r requirements-dev.txt
 pytest
 ```
+
+GitHub Actions runs this same test command on every push to `main` and every pull request.
 
 ---
 
@@ -230,7 +232,7 @@ codes: `TEMP_HIGH`, `TEMP_LOW`, `HUMIDITY_HIGH`, `VIBRATION_HIGH`,
 | `agent_execution_logs` | Agent run traces (the agent team populates these) |
 | `session_events` | High-signal event stream |
 
-Full field contracts are documented inline in [init_db.py](init_db.py).
+Full field contracts are documented inline in [scripts/init_db.py](scripts/init_db.py).
 
 ---
 
@@ -271,8 +273,9 @@ resp = client.chat.completions.create(
 ## Module map
 
 ```
-init_db.py                  Idempotent DB setup + seed (run once)
-knowledge_seed.py           14-entry knowledge corpus
+scripts/
+  init_db.py                Idempotent DB setup + seed (run once)
+  knowledge_seed.py         14-entry knowledge corpus
 ingestor_service/
   api.py                    FastAPI app; registers read+write routers
   config.py                 Env accessors (Mongo, Gemini, Groq)
@@ -284,8 +287,8 @@ ingestor_service/
   routes_write.py           PATCH/POST endpoints (agent/manager/staff writes)
   feedback_to_knowledge.py  Closed RAG loop
   detector/                 Thresholds, severity, state, detection
+  severity_engine.py        breach_ratio → severity_level / severity_type
 simulator_service/          Telemetry generator
-severity_engine.py          breach_ratio → severity_level / severity_type
 ```
 
 ---

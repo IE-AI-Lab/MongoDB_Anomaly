@@ -1,6 +1,6 @@
 """Initial knowledge corpus to seed `knowledge_base`.
 
-Imported by init_db.py (see seed_knowledge_base there). Each entry uses the
+Imported by scripts/init_db.py (see seed_knowledge_base there). Each entry uses the
 field names knowledge_base expects, minus the fields init_db fills in at insert
 time (document_id, text_embedding, embedding_model, embedding_dimensions,
 ingested_at_utc, schema_version).
@@ -12,7 +12,7 @@ NOTE: associated_error_codes here should intersect the codes the detector emits
 error_code filter can join anomalies to docs.
 
 NOTE: equipment_type values must match the seeded sensor fleet's equipment_type
-(see init_db.py seed_sensors): packaging_room, control_room, centrifugal_pump,
+(see scripts/init_db.py seed_sensors): packaging_room, control_room, centrifugal_pump,
 conveyor_motor, hydraulic_line, coolant_loop. This is the join key for
 search_knowledge's equipment_type filter — every sensor type below has at least
 one matching active doc. error_code remains the primary join; equipment_type is

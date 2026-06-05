@@ -5,7 +5,7 @@ Breach ratio examples (limit above, observed 100, max 80):
     ratio = (100 - 80) / 80 = 0.25  ->  high, level 10
 
 Load bands from system_metadata config_type "severity_bands" in production;
-defaults below match the seeded document in init_db.py.
+defaults below match the seeded document in scripts/init_db.py.
 """
 
 from __future__ import annotations

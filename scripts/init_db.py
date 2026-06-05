@@ -23,7 +23,7 @@ from pymongo.errors import CollectionInvalid, OperationFailure, PyMongoError
 
 from ingestor_service import config as svc_config
 from ingestor_service.rag import embed
-from knowledge_seed import KNOWLEDGE_SEED
+from .knowledge_seed import KNOWLEDGE_SEED
 
 
 STANDARD_COLLECTIONS = (
@@ -355,7 +355,7 @@ def seed_system_metadata(db: Database[dict[str, Any]]) -> None:
     now = utc_now()
     base = {
         "is_enabled": True,
-        "last_updated_by": "init_db.py",
+        "last_updated_by": "scripts/init_db.py",
         "last_updated_at_utc": now,
         "schema_version": 1,
     }
@@ -671,7 +671,7 @@ def seed_knowledge_base(db: Database[dict[str, Any]]) -> None:
             {"document_id": doc_id},
             {
                 "document_id": doc_id,
-                "source_file": "knowledge_seed.py:KNOWLEDGE_SEED",
+                "source_file": "scripts/knowledge_seed.py:KNOWLEDGE_SEED",
                 "page_number": None,
                 "section_title": entry["section_title"],
                 "equipment_type": entry["equipment_type"],
