@@ -18,11 +18,14 @@ API by the agent team — it lives elsewhere and is not in this repo.
                                    │                          ├ anomalies
                                    ├ detector/ (thresholds,   ├ sensors
                                    │   severity, debounce)    ├ staff_on_call
-                                   ├ rag.py ──embed──▶ Gemini  ├ knowledge_base  (+ vector index)
-                                   └ routes_read / routes_write├ system_metadata
-                                                               ├ agent_execution_logs
-        agent (external) ──HTTP──▶ read/write API ────────────┘ session_events
-                          └─chat──▶ Groq
+                                   ├ queue.py ──XADD──▶ Redis ├ knowledge_base  (+ vector index)
+                                   ├ rag.py ──embed──▶ Gemini ├ system_metadata
+                                   └ routes_read / routes_write├ agent_execution_logs
+                                                               └ session_events
+        agent_worker ──XREADGROUP──▶ Redis (anomaly:jobs)
+              │
+              └──HTTP──▶ read/write API ──▶ MongoDB Atlas
+              └──chat──▶ Groq (LangGraph — wire in agent_worker/consumer.py)
 ```
 
 Two LLM providers (both free-tier):
@@ -98,9 +101,17 @@ Wait ~1 min for status `READY`. **`numDimensions` must equal `EMBED_DIMENSIONS`.
 
 ### 5. Run
 
+Set `AGENT_DISPATCH=redis` in `.env` when using the queue (default is `stub`).
+
 ```bash
+# Redis (separate terminal)
+redis-server
+
 # API
 uvicorn ingestor_service.api:app --reload --host 0.0.0.0 --port 8000
+
+# Agent worker (separate terminal) — blocks on Redis up to 20s per read
+python -m agent_worker.main
 
 # Simulator (separate terminal) — generates telemetry that triggers anomalies
 python -m simulator_service.main --base-url http://localhost:8000 --tick-seconds 5
@@ -108,6 +119,12 @@ python -m simulator_service.main --base-url http://localhost:8000 --tick-seconds
 # ...or force a guaranteed anomaly every 10 ticks for demos:
 python -m simulator_service.main --base-url http://localhost:8000 --deterministic-demo
 ```
+
+When an anomaly is detected, the ingestor **XADD**s `{ anomaly_id, ... }` to the
+Redis stream `anomaly:jobs`. The agent worker **XREADGROUP**s with a 20s block
+(`AGENT_CONSUMER_BLOCK_MS`), fetches full context via the read API, and **XACK**s
+when done. Replace `process_anomaly_job()` in `agent_worker/consumer.py` with
+your LangGraph graph.
 
 Interactive API docs at `http://localhost:8000/docs`.
 
@@ -286,8 +303,12 @@ ingestor_service/
   routes_read.py            GET endpoints (agent reads)
   routes_write.py           PATCH/POST endpoints (agent/manager/staff writes)
   feedback_to_knowledge.py  Closed RAG loop
+  queue.py                  XADD anomaly jobs to Redis Streams
+  agent_stub.py             stdout stub when AGENT_DISPATCH=stub
   detector/                 Thresholds, severity, state, detection
   severity_engine.py        breach_ratio → severity_level / severity_type
+agent_worker/               Redis consumer (python -m agent_worker.main)
+  consumer.py               XREADGROUP loop + process_anomaly_job hook
 simulator_service/          Telemetry generator
 ```
 

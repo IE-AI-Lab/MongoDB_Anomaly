@@ -5,7 +5,7 @@ This service is deliberately minimal:
 - validate payload
 - store telemetry in Mongo
 - run in-memory anomaly detection
-- call a local agent stub if triggered
+- dispatch anomaly jobs (stub or Redis stream) if triggered
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from .db import ensure_indexes
 from .ingest import persist_telemetry
 from .models import IngestResponse, TelemetryIngestEvent
 from .detector.detect import process_telemetry
+from .queue import ensure_anomaly_stream
 from .routes_read import router as read_router
 from .routes_write import router as write_router
 
@@ -37,6 +38,7 @@ def _startup() -> None:
     - Ensures indexes exist (including TTL).
     """
     ensure_indexes()
+    ensure_anomaly_stream()
 
 
 @app.get("/health")

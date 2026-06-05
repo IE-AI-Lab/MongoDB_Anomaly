@@ -6,7 +6,7 @@ Given a newly persisted telemetry document, decide whether it triggers an anomal
 Design constraints:
 - Keep state in memory for now (consecutive violation counters).
 - Build an anomaly document that matches the anomalies contract.
-- If anomaly triggers, call the agent stub.
+- If anomaly triggers, dispatch to the agent layer (stub or Redis queue).
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from ..severity_engine import build_anomaly_severity_fields
-from ..agent_stub import handle_anomaly
+from ..queue import dispatch_anomaly
 from ..db import col
 from .state import get_counter
 from .thresholds import Threshold, get_threshold
@@ -96,7 +96,7 @@ def process_telemetry(telemetry_doc: dict[str, Any]) -> Optional[dict[str, Any]]
     2) For each candidate metric, load the corresponding threshold rule.
     3) Update consecutive violation state for (sensor_id, metric_name).
     4) If consecutive_required is met, create an anomaly document and persist it.
-    5) Call agent_stub(handle_anomaly) with the anomaly doc.
+    5) dispatch_anomaly(anomaly_doc) — stub or Redis stream.
 
     Returns:
     - The created anomaly document if triggered, otherwise None.
@@ -185,7 +185,7 @@ def process_telemetry(telemetry_doc: dict[str, Any]) -> Optional[dict[str, Any]]
             }
         )
 
-        handle_anomaly(anomaly_doc)
+        dispatch_anomaly(anomaly_doc)
         return anomaly_doc
 
     return None
