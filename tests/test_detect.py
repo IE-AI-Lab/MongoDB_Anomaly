@@ -73,7 +73,7 @@ def fake_col(monkeypatch):
     state.reset_all()
     fake = _FakeDB()
     monkeypatch.setattr(detect, "col", fake)
-    monkeypatch.setattr(detect, "handle_anomaly", lambda doc: None)
+    monkeypatch.setattr(detect, "dispatch_anomaly", lambda doc: None)
     return fake
 
 

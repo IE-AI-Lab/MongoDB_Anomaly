@@ -108,3 +108,32 @@ def chat_model() -> str:
     """Chat model used by the agent team's reasoning layer."""
     return os.getenv("CHAT_MODEL", "llama-3.3-70b-versatile")
 
+
+# --- Agent dispatch: stub (stdout) or Redis Streams queue -------------------
+
+
+def agent_dispatch() -> str:
+    """
+    How newly detected anomalies are handed off to the agent layer.
+
+    - stub: print via agent_stub (local dev without Redis)
+    - redis: XADD to the anomaly stream for agent_worker to consume
+    """
+    return os.getenv("AGENT_DISPATCH", "stub").strip().lower()
+
+
+def redis_url() -> str:
+    return os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+
+def anomaly_stream_key() -> str:
+    return os.getenv("ANOMALY_STREAM_KEY", "anomaly:jobs")
+
+
+def anomaly_consumer_group() -> str:
+    return os.getenv("ANOMALY_CONSUMER_GROUP", "agent-workers")
+
+
+def anomaly_stream_maxlen() -> int:
+    return int(os.getenv("ANOMALY_STREAM_MAXLEN", "10000"))
+
