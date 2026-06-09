@@ -56,37 +56,15 @@ def service_name() -> str:
     return os.getenv("SERVICE_NAME", "ingestor_service")
 
 
-# --- Embeddings: Google Gemini (free tier) -----------------------------------
-# Groq has no embeddings endpoint, so embeddings come from Gemini while chat
-# comes from Groq (see below). The vector index in Atlas must match
-# embed_dimensions().
+# --- Embeddings: managed by Atlas Vector Search (Voyage AI Automated Embedding)
+# Atlas generates embeddings at index + query time from `text_content`; this
+# service never computes or stores vectors and needs no embeddings API key.
+# This model MUST match the model set in the `knowledge_vector` autoEmbed index.
 
 
-def google_api_key() -> str:
-    """
-    Google AI Studio API key for Gemini embeddings.
-
-    Optional at startup: returns "" when unset so the service can boot without
-    RAG configured. rag.py raises a clear error only when an embedding is
-    actually requested without a key.
-    """
-    return os.getenv("GOOGLE_API_KEY", "")
-
-
-def embed_model() -> str:
-    """Gemini embedding model. gemini-embedding-001 supports Matryoshka
-    truncation to embed_dimensions() (768/1536/3072)."""
-    return os.getenv("EMBED_MODEL", "gemini-embedding-001")
-
-
-def embed_dimensions() -> int:
-    """
-    Embedding vector dimensionality.
-
-    Must match the Atlas vector index (step 03) and every stored
-    text_embedding. text-embedding-004 = 768.
-    """
-    return int(os.getenv("EMBED_DIMENSIONS", "768"))
+def voyage_embed_model() -> str:
+    """Voyage AI model used by the knowledge_vector autoEmbed index + queries."""
+    return os.getenv("VOYAGE_EMBED_MODEL", "voyage-4-lite")
 
 
 # --- Chat / agent reasoning: Groq (OpenAI-compatible endpoint) ----------------

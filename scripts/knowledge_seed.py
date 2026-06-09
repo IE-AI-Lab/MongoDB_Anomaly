@@ -2,8 +2,8 @@
 
 Imported by scripts/init_db.py (see seed_knowledge_base there). Each entry uses the
 field names knowledge_base expects, minus the fields init_db fills in at insert
-time (document_id, text_embedding, embedding_model, embedding_dimensions,
-ingested_at_utc, schema_version).
+time (document_id, ingested_at_utc, schema_version). Embeddings are not stored —
+Atlas Automated Embedding generates them from text_content.
 
 Metric types follow the existing enum: environment, vibration, pressure, flow.
 
