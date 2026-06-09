@@ -8,9 +8,9 @@ import time
 from typing import Any
 
 import redis
-import requests
 
 from . import config
+from .anomaly_graph import run_anomaly_graph
 
 log = logging.getLogger(__name__)
 
@@ -53,25 +53,23 @@ def process_anomaly_job(fields: dict[str, str]) -> None:
     """
     Handle one queued anomaly.
 
-    Today: fetch context from the ingestor read API and log a summary.
-    Replace/extend this with your LangGraph graph invocation.
+    Fetch context and commit analysis through the LangGraph graph. The graph
+    talks to the data layer over HTTP so this worker stays decoupled from Mongo.
     """
     anomaly_id = fields.get("anomaly_id", "")
-    base = config.data_layer_base_url()
-    url = f"{base}/anomalies/{anomaly_id}"
+    log.info("processing anomaly_id=%s via LangGraph", anomaly_id)
 
-    resp = requests.get(url, timeout=30)
-    resp.raise_for_status()
-    anomaly = resp.json()
+    result = run_anomaly_graph(fields, base_url=config.data_layer_base_url())
+    if result.get("skipped"):
+        log.info("skipped anomaly_id=%s reason=%s", anomaly_id, result.get("skip_reason"))
+        return
 
+    patched = result.get("patched_anomaly", {})
     log.info(
-        "processing anomaly_id=%s sensor_id=%s error_code=%s severity=%s:%s status=%s",
-        anomaly.get("anomaly_id"),
-        anomaly.get("sensor_id"),
-        anomaly.get("error_code"),
-        anomaly.get("severity_type"),
-        anomaly.get("severity_level"),
-        anomaly.get("status"),
+        "analyzed anomaly_id=%s status=%s recommended_employee_id=%s",
+        patched.get("anomaly_id", anomaly_id),
+        patched.get("status"),
+        patched.get("recommended_employee_id"),
     )
 
 
