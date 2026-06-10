@@ -59,6 +59,7 @@ def embed_resolution_into_knowledge(
         "text_content": text,
         "chunk_index": 0,
         "is_active": False,            # awaits curator review
+        "curation_status": "pending",  # pending -> approved | rejected (routes_curation.py)
         "ingested_at_utc": now,
         "schema_version": 1,
         "source_metadata": {

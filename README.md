@@ -194,6 +194,18 @@ Base URL: `http://localhost:8000`. All responses are JSON with Mongo `_id` strip
 | `POST` | `/anomalies/{anomaly_id}/assign` | `{employee_id}` | assigns staff, sets `assigned`, flips staff `is_on_call→false` |
 | `POST` | `/anomalies/{anomaly_id}/resolve` | `{outcome, resolution_notes, resolved_by?}` | sets `resolved`, frees staff; if `outcome=="fixed"`, embeds notes into `knowledge_base` and returns `knowledge_document_id` |
 
+### Curation (human reviews the closed RAG loop)
+
+Resolution feedback enters `knowledge_base` as `is_active=false`,
+`curation_status="pending"` and is invisible to retrieval until a curator
+approves it — a guardrail against poisoning RAG with bad field notes.
+
+| Method | Path | Body | Effect |
+|--------|------|------|--------|
+| `GET`  | `/knowledge/pending` | `limit` (1–500) | list docs awaiting review, newest first |
+| `POST` | `/knowledge/{document_id}/activate` | `{curator_id?}` | approve → `is_active=true`, enters retrieval |
+| `POST` | `/knowledge/{document_id}/reject` | `{curator_id?, reason?}` | reject → stays inactive, marked `rejected` |
+
 #### Example agent flow
 
 ```bash
@@ -269,9 +281,16 @@ Full field contracts are documented inline in [scripts/init_db.py](scripts/init_
 No `embed()` helper — the service never computes a vector.
 
 **Closed loop:** resolving an anomaly with `outcome="fixed"` writes the
-resolution notes back into `knowledge_base` as `is_active=false`. A human curator
-must flip `is_active=true` before it influences retrieval — a guardrail against
-poisoning RAG with bad notes.
+resolution notes back into `knowledge_base` as `is_active=false`,
+`curation_status="pending"`. A human curator approves it via
+`POST /knowledge/{document_id}/activate` (see **Curation** above) before it
+influences retrieval — a guardrail against poisoning RAG with bad notes.
+
+### Migrations
+
+`python -m scripts.migrate_drop_embedding_fields` — one-off cleanup that
+`$unset`s the pre-autoEmbed `text_embedding` / `embedding_model` /
+`embedding_dimensions` fields from `knowledge_base`. Idempotent.
 
 ---
 

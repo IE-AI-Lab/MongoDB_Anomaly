@@ -21,6 +21,7 @@ from .queue import ensure_anomaly_stream
 from .routes_read import router as read_router
 from .routes_write import router as write_router
 from .routes_agent_logs import router as agent_logs_router
+from .routes_curation import router as curation_router
 
 
 load_dotenv()
@@ -29,6 +30,7 @@ app = FastAPI(title="Telemetry Ingestor", version="0.1.0")
 app.include_router(read_router)
 app.include_router(write_router)
 app.include_router(agent_logs_router)
+app.include_router(curation_router)
 
 
 @app.on_event("startup")
