@@ -49,7 +49,7 @@ Copy `.env.example` → `.env` and fill in:
 
 ```bash
 MONGO_URI="mongodb+srv://<user>:<password>@<cluster>.mongodb.net/"
-DB_NAME="anomaly_detection"
+DB_NAME="anomaly_db"
 
 # Embeddings — managed by Atlas (Voyage AI); no key needed.
 # Must match the model set in the knowledge_vector autoEmbed index.
@@ -194,6 +194,22 @@ Base URL: `http://localhost:8000`. All responses are JSON with Mongo `_id` strip
 | `POST` | `/anomalies/{anomaly_id}/assign` | `{employee_id}` | assigns staff, sets `assigned`, flips staff `is_on_call→false` |
 | `POST` | `/anomalies/{anomaly_id}/resolve` | `{outcome, resolution_notes, resolved_by?}` | sets `resolved`, frees staff; if `outcome=="fixed"`, embeds notes into `knowledge_base` and returns `knowledge_document_id` |
 
+### Knowledge curation (CRUD over `knowledge_base`)
+
+| Method | Path | Params / body | Use |
+|--------|------|---------------|-----|
+| `GET` | `/knowledge` | `is_active`, `equipment_type`, `source` (seed/feedback/manual), `limit`, `skip` | list entries; `?is_active=false&source=feedback` = **review queue** |
+| `GET` | `/knowledge/{document_id}` | — | one entry |
+| `POST` | `/knowledge` | `{section_title, text_content, equipment_type?, associated_error_codes?, is_active?}` | create manual entry (`kb-` id); Atlas autoEmbed indexes it |
+| `PATCH` | `/knowledge/{document_id}` | any subset of the create fields | curator **approves** feedback with `{"is_active": true}` |
+| `DELETE` | `/knowledge/{document_id}` | — | hard delete — curator **rejects** a feedback entry |
+
+### Admin (dev/demo)
+
+| Method | Path | Body | Effect |
+|--------|------|------|--------|
+| `POST` | `/simulation/reset` | `{purge_feedback_knowledge?: false}` | purges anomalies, telemetry, agent logs, session events; restores all staff to on-call; trims the Redis job stream; seed data untouched. Restart the simulator to reset its sequence counters. |
+
 #### Example agent flow
 
 ```bash
@@ -299,7 +315,7 @@ scripts/
   init_db.py                Idempotent DB setup + seed (run once)
   knowledge_seed.py         14-entry knowledge corpus
 ingestor_service/
-  api.py                    FastAPI app; registers read+write routers
+  api.py                    FastAPI app; registers all routers
   config.py                 Env accessors (Mongo, Voyage model, Groq)
   db.py                     Sync PyMongo client + col() helper + indexes
   models.py                 Telemetry ingestion Pydantic contract
@@ -307,6 +323,9 @@ ingestor_service/
   rag.py                    search_knowledge() (Atlas autoEmbed)
   routes_read.py            GET endpoints (agent reads)
   routes_write.py           PATCH/POST endpoints (agent/manager/staff writes)
+  routes_agent_logs.py      POST/GET /agent_logs (agent run traces)
+  routes_knowledge.py       knowledge_base CRUD + curation review queue
+  routes_admin.py           POST /simulation/reset (demo state purge)
   feedback_to_knowledge.py  Closed RAG loop
   queue.py                  XADD anomaly jobs to Redis Streams
   agent_stub.py             stdout stub when AGENT_DISPATCH=stub
