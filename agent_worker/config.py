@@ -27,3 +27,29 @@ def consumer_block_ms() -> int:
 
 def data_layer_base_url() -> str:
     return os.getenv("DATA_LAYER_BASE_URL", "http://localhost:8000").rstrip("/")
+
+
+# --- Chat / agent reasoning: Groq (OpenAI-compatible endpoint) ----------------
+# Mirrors ingestor_service.config but lives here because the worker is a separate
+# process. Used by the OpenAI SDK (NOT the native groq/langchain_groq SDKs — the
+# base URL already includes /openai/v1, which those would double up).
+
+
+def groq_api_key() -> str:
+    """Groq API key. Empty ⇒ the graph skips LLM reasoning and uses the
+    deterministic fallback, so the worker still runs without a key."""
+    return os.getenv("GROQ_API_KEY", "")
+
+
+def groq_base_url() -> str:
+    return os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+
+
+def chat_model() -> str:
+    return os.getenv("CHAT_MODEL", "llama-3.3-70b-versatile")
+
+
+# --- Agent identity (written into agent_execution_logs traces) ----------------
+
+AGENT_NAME = "mongodb-anomaly-agent"
+AGENT_VERSION = "0.1.0"

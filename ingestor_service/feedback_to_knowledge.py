@@ -1,9 +1,12 @@
-"""Closed RAG loop — embed field-resolution feedback back into knowledge_base.
+"""Closed RAG loop — feed field-resolution notes back into knowledge_base.
 
 Sync PyMongo variant. Imported by routes_write.py (step 06). New entries are
 inserted with is_active=False so a human curator reviews them before they
 influence retrieval — a deliberate guardrail, since bad resolution notes would
 otherwise poison RAG forever. The data team owns the curation queue.
+
+Embeddings are managed by Atlas Automated Embedding (Voyage AI): we only store
+`text_content`; Atlas embeds it for the `knowledge_vector` index automatically.
 """
 from __future__ import annotations
 
@@ -11,9 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from . import config
 from .db import col
-from .rag import embed
 
 
 def embed_resolution_into_knowledge(
@@ -34,7 +35,6 @@ def embed_resolution_into_knowledge(
         f"Field resolution: {resolution_notes}"
     )
 
-    vec = embed(text)
     doc_id = f"fb-{uuid.uuid4()}"
 
     # equipment_type lookup — fall back to the sensors collection if the
@@ -57,9 +57,6 @@ def embed_resolution_into_knowledge(
             [anomaly["error_code"]] if anomaly.get("error_code") else []
         ),
         "text_content": text,
-        "text_embedding": vec,
-        "embedding_model": config.embed_model(),
-        "embedding_dimensions": config.embed_dimensions(),
         "chunk_index": 0,
         "is_active": False,            # awaits curator review
         "ingested_at_utc": now,

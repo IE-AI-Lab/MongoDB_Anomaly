@@ -19,7 +19,7 @@ API by the agent team — it lives elsewhere and is not in this repo.
                                    ├ detector/ (thresholds,   ├ sensors
                                    │   severity, debounce)    ├ staff_on_call
                                    ├ queue.py ──XADD──▶ Redis ├ knowledge_base  (+ vector index)
-                                   ├ rag.py ──embed──▶ Gemini ├ system_metadata
+                                   ├ rag.py ─$vectorSearch──▶ ├ system_metadata
                                    └ routes_read / routes_write├ agent_execution_logs
                                                                └ session_events
         agent_worker ──XREADGROUP──▶ Redis (anomaly:jobs)
@@ -28,15 +28,16 @@ API by the agent team — it lives elsewhere and is not in this repo.
               └──chat──▶ Groq (LangGraph — wire in agent_worker/consumer.py)
 ```
 
-Two LLM providers (both free-tier):
+Providers:
 
 | Use | Provider | Model | Notes |
 |-----|----------|-------|-------|
-| **Embeddings** | Google Gemini | `gemini-embedding-001` | 768 dims (Matryoshka-truncated, L2-normalized) |
+| **Embeddings** | Atlas Vector Search (Voyage AI) | `voyage-4-lite` | Automated Embedding — Atlas embeds `text_content` at index + query time; no key, no vectors stored |
 | **Chat / reasoning** | Groq | `llama-3.3-70b-versatile` | OpenAI-compatible endpoint |
 
-> Groq has **no embeddings endpoint** — that's why embeddings come from Gemini.
-> The two are configured independently (see `.env.example`).
+> Embeddings are a database concern: we store only `text_content` and Atlas
+> generates the vector via the `knowledge_vector` autoEmbed index. The chat
+> provider (Groq) is configured independently (see `.env.example`).
 
 ---
 
@@ -50,10 +51,9 @@ Copy `.env.example` → `.env` and fill in:
 MONGO_URI="mongodb+srv://<user>:<password>@<cluster>.mongodb.net/"
 DB_NAME="anomaly_detection"
 
-# Embeddings (https://aistudio.google.com/apikey)
-GOOGLE_API_KEY=...
-EMBED_MODEL=gemini-embedding-001
-EMBED_DIMENSIONS=768
+# Embeddings — managed by Atlas (Voyage AI); no key needed.
+# Must match the model set in the knowledge_vector autoEmbed index.
+VOYAGE_EMBED_MODEL=voyage-4-lite
 
 # Chat (https://console.groq.com/keys)
 GROQ_API_KEY=...
@@ -71,8 +71,9 @@ pip install -r requirements.txt
 
 ### 3. Initialize the database
 
-Creates collections + indexes, seeds thresholds/staff/sensors, and embeds the
-14-entry knowledge corpus (`scripts/knowledge_seed.py`) into `knowledge_base`:
+Creates collections + indexes, seeds thresholds/staff/sensors, and loads the
+14-entry knowledge corpus (`scripts/knowledge_seed.py`) into `knowledge_base`
+(text only — Atlas generates the embeddings):
 
 ```bash
 python -m scripts.init_db
@@ -80,16 +81,16 @@ python -m scripts.init_db
 
 ### 4. Create the Atlas Vector Search index (one-time, manual)
 
-The knowledge search falls back to a recency sort until this exists. In the
-Atlas UI: **Atlas Search → Create Search Index → Vector Search → JSON editor**,
-on the `knowledge_base` collection, named `knowledge_vector`:
+The knowledge search falls back to a recency sort until this index is **Active**.
+In the Atlas UI: **Atlas Search → Create Search Index → Vector Search → JSON
+editor**, on the `knowledge_base` collection, named `knowledge_vector`. This uses
+**Automated Embedding** (`autoEmbed`) — Atlas embeds `text_content` for you, so we
+store no vectors:
 
 ```json
 {
-  "name": "knowledge_vector",
-  "type": "vectorSearch",
   "fields": [
-    { "type": "vector", "path": "text_embedding", "numDimensions": 768, "similarity": "cosine" },
+    { "type": "autoEmbed", "modality": "text", "path": "text_content", "model": "voyage-4-lite" },
     { "type": "filter", "path": "equipment_type" },
     { "type": "filter", "path": "associated_error_codes" },
     { "type": "filter", "path": "is_active" }
@@ -97,7 +98,9 @@ on the `knowledge_base` collection, named `knowledge_vector`:
 }
 ```
 
-Wait ~1 min for status `READY`. **`numDimensions` must equal `EMBED_DIMENSIONS`.**
+Wait ~1 min for status `READY`/`Active`. The `model` here must equal
+`VOYAGE_EMBED_MODEL`. Requires a cluster tier with Automated Embedding (Voyage AI)
+enabled — supported on M0/Flex and dedicated tiers.
 
 ### 5. Run
 
@@ -244,7 +247,7 @@ codes: `TEMP_HIGH`, `TEMP_LOW`, `HUMIDITY_HIGH`, `VIBRATION_HIGH`,
 | `anomalies` | Detected anomalies + agent analysis + resolution |
 | `sensors` | Sensor registry (`equipment_type` joins to knowledge) |
 | `staff_on_call` | On-call roster, by `specialization` / `handled_severity_type` / `escalation_rank` |
-| `knowledge_base` | RAG corpus with `text_embedding` (768d). `is_active=false` = awaiting curation |
+| `knowledge_base` | RAG corpus (`text_content`; Atlas autoEmbed generates the vector). `is_active=false` = awaiting curation |
 | `system_metadata` | Config-as-data: thresholds + severity bands |
 | `agent_execution_logs` | Agent run traces (the agent team populates these) |
 | `session_events` | High-signal event stream |
@@ -257,13 +260,15 @@ Full field contracts are documented inline in [scripts/init_db.py](scripts/init_
 
 `ingestor_service/rag.py`:
 
-- `embed(text) -> list[float]` — 768-dim Gemini vector (L2-normalized).
 - `search_knowledge(query, *, equipment_type=None, error_codes=None, k=5)` —
-  Atlas `$vectorSearch` over `text_embedding`, pre-filtered to `is_active=True`
-  (+ optional `equipment_type` / `error_codes`). **Falls back to a filtered
-  recency sort** when the `knowledge_vector` index is missing or returns empty.
+  Atlas `$vectorSearch` with **automated query embedding** (passes the raw query
+  text + model; Atlas embeds it), pre-filtered to `is_active=True` (+ optional
+  `equipment_type` / `error_codes`). **Falls back to a filtered recency sort**
+  when the `knowledge_vector` index is not Active yet or returns empty.
 
-**Closed loop:** resolving an anomaly with `outcome="fixed"` embeds the
+No `embed()` helper — the service never computes a vector.
+
+**Closed loop:** resolving an anomaly with `outcome="fixed"` writes the
 resolution notes back into `knowledge_base` as `is_active=false`. A human curator
 must flip `is_active=true` before it influences retrieval — a guardrail against
 poisoning RAG with bad notes.
@@ -295,11 +300,11 @@ scripts/
   knowledge_seed.py         14-entry knowledge corpus
 ingestor_service/
   api.py                    FastAPI app; registers read+write routers
-  config.py                 Env accessors (Mongo, Gemini, Groq)
+  config.py                 Env accessors (Mongo, Voyage model, Groq)
   db.py                     Sync PyMongo client + col() helper + indexes
   models.py                 Telemetry ingestion Pydantic contract
   ingest.py                 Persist telemetry
-  rag.py                    embed() + search_knowledge()
+  rag.py                    search_knowledge() (Atlas autoEmbed)
   routes_read.py            GET endpoints (agent reads)
   routes_write.py           PATCH/POST endpoints (agent/manager/staff writes)
   feedback_to_knowledge.py  Closed RAG loop
@@ -318,9 +323,10 @@ simulator_service/          Telemetry generator
 
 - **Synchronous PyMongo.** `db.py` is sync; FastAPI handlers are plain `def`
   (FastAPI runs them in a threadpool). Do **not** add `async`/`await` to DB calls.
-- **Embedding dims are load-bearing.** `EMBED_DIMENSIONS`, the stored
-  `text_embedding`, and the Atlas index `numDimensions` must all match (768).
-  Change the model? Re-embed everything and recreate the index.
+- **Embeddings are managed by Atlas.** We store only `text_content`; the
+  `knowledge_vector` autoEmbed index generates and syncs the vector. No
+  dimensions to match. Change `VOYAGE_EMBED_MODEL`? Update the index's `model`
+  to match (Atlas re-embeds), then re-seed if needed.
 - **Status vocabulary:** `unresolved → analyzed → assigned → resolved`.
 - **Knowledge search before the index exists** returns recency-sorted results
   (with a warning log), not vector-ranked. Create the `knowledge_vector` index
