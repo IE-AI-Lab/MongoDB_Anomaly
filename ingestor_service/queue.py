@@ -102,6 +102,25 @@ def publish_anomaly_job(anomaly_doc: dict[str, Any]) -> Optional[str]:
         return None
 
 
+def trim_anomaly_stream() -> bool:
+    """
+    Drop all undelivered jobs from the anomaly stream (XTRIM maxlen=0).
+
+    Used by POST /simulation/reset so queued jobs don't reference purged
+    anomalies. XTRIM (unlike DEL) preserves the stream and its consumer group.
+    Best-effort: returns False if dispatch isn't redis or Redis is unreachable.
+    """
+    if config.agent_dispatch() != "redis":
+        return False
+    try:
+        _redis().xtrim(name=config.anomaly_stream_key(), maxlen=0)
+        log.info("trimmed anomaly stream %s", config.anomaly_stream_key())
+        return True
+    except Exception as exc:
+        log.warning("failed to trim anomaly stream: %s", exc)
+        return False
+
+
 def dispatch_anomaly(anomaly_doc: dict[str, Any]) -> None:
     """Route a new anomaly to the configured agent integration (stub or redis)."""
     mode = config.agent_dispatch()
