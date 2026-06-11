@@ -18,8 +18,7 @@ class AgentState(TypedDict, total=False):
     anomaly: dict[str, Any]
     sensor: dict[str, Any]
     readings: list[dict[str, Any]]
-    knowledge: list[dict[str, Any]]
-    staff_candidates: list[dict[str, Any]]
+    agent_decision: dict[str, Any]
     analysis: dict[str, Any]
     patched_anomaly: dict[str, Any]
     skipped: bool
@@ -53,6 +52,22 @@ class DataLayerClient:
                 f"{method} {url} failed with {response.status_code}: {response.text}"
             ) from exc
         return response.json()
+
+
+def investigation_agent_node(state: AgentState) -> AgentState:
+    from .investigation_agent import run_investigation_agent
+
+    decision = run_investigation_agent(
+        state["anomaly"],
+        state.get("sensor", {}),
+        state.get("readings", []),
+    )
+
+    print(f"Agent decision: {decision.get('decision')}")
+    print(f"Severity: {decision.get('severity')}")
+    print(f"Confidence: {decision.get('confidence')}")
+
+    return {**state, "agent_decision": decision}
 
 
 def _client(state: AgentState) -> DataLayerClient:
@@ -108,83 +123,7 @@ def fetch_readings_node(state: AgentState) -> AgentState:
     return {**state, "readings": readings}
 
 
-def _fault_query(anomaly: Mapping[str, Any], sensor: Mapping[str, Any]) -> str:
-    trigger = anomaly.get("trigger_value") or {}
-    metric = trigger.get("metric") or anomaly.get("metric_type", "metric")
-    observed = trigger.get("observed", "unknown")
-    limit = trigger.get("limit", "unknown")
-    equipment_type = sensor.get("equipment_type") or "equipment"
-    equipment_id = anomaly.get("equipment_id") or anomaly.get("sensor_id")
-    error_code = anomaly.get("error_code", "anomaly")
-
-    return (
-        f"{equipment_type} {equipment_id} {error_code}: "
-        f"{metric} observed {observed} with limit {limit}"
-    )
-
-
-def search_knowledge_node(state: AgentState) -> AgentState:
-    anomaly = state["anomaly"]
-    sensor = state.get("sensor", {})
-    knowledge = _client(state).get(
-        "/knowledge/search",
-        q=_fault_query(anomaly, sensor),
-        equipment_type=sensor.get("equipment_type"),
-        error_codes=anomaly.get("error_code"),
-        k=5,
-    )
-
-    print(f"Retrieved {len(knowledge)} knowledge documents")
-    return {**state, "knowledge": knowledge}
-
-
-def find_staff_node(state: AgentState) -> AgentState:
-    anomaly = state["anomaly"]
-    metric_type = anomaly.get("metric_type")
-    severity_type = anomaly.get("severity_type")
-    facility_id = anomaly.get("facility_id")
-    client = _client(state)
-
-    candidates = client.get(
-        "/staff_on_call",
-        is_on_call="true",
-        specialization=metric_type,
-        handled_severity_type=severity_type,
-        facility_id=facility_id,
-    )
-
-    if not candidates:
-        candidates = client.get(
-            "/staff_on_call",
-            is_on_call="true",
-            specialization=metric_type,
-        )
-
-    print(f"Found {len(candidates)} staff candidates")
-    return {**state, "staff_candidates": candidates}
-
-
-def _compact_knowledge(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    compact: list[dict[str, Any]] = []
-    for doc in docs[:5]:
-        compact.append(
-            {
-                "document_id": doc.get("document_id") or doc.get("knowledge_id") or doc.get("id"),
-                "section_title": doc.get("section_title"),
-                "equipment_type": doc.get("equipment_type"),
-                "associated_error_codes": doc.get("associated_error_codes"),
-                "text_content": (doc.get("text_content") or "")[:800],
-            }
-        )
-    return compact
-
-
-def _build_analysis(
-    anomaly: Mapping[str, Any],
-    sensor: Mapping[str, Any],
-    knowledge: list[dict[str, Any]],
-    staff_candidates: list[dict[str, Any]],
-) -> dict[str, Any]:
+def _fallback_analysis(anomaly: Mapping[str, Any]) -> dict[str, Any]:
     trigger = anomaly.get("trigger_value") or {}
     metric = trigger.get("metric") or anomaly.get("metric_type", "metric")
     observed = trigger.get("observed", "unknown")
@@ -195,17 +134,12 @@ def _build_analysis(
     severity_level = anomaly.get("severity_level", "unknown")
     equipment_id = anomaly.get("equipment_id") or anomaly.get("sensor_id", "equipment")
     unit = trigger.get("unit") or ""
-    case_hint = ""
-
-    if knowledge:
-        title = knowledge[0].get("section_title") or "the top retrieved knowledge case"
-        case_hint = f" Grounding: review {title}."
 
     description = (
         f"{error_code} detected on {equipment_id}. "
         f"{metric} is {observed}{unit} against limit {limit}{unit} after "
         f"{consecutive_count} consecutive readings. "
-        f"Severity is {severity_type} at level {severity_level}.{case_hint}"
+        f"Severity is {severity_type} at level {severity_level}."
     )
 
     recommended_solution = (
@@ -217,20 +151,29 @@ def _build_analysis(
     return {
         "description": description,
         "recommended_solution": recommended_solution,
-        "recommended_employee_id": (
-            staff_candidates[0].get("employee_id") if staff_candidates else None
-        ),
+        "recommended_employee_id": None,
+        "similar_cases": [],
     }
 
 
 def analyze_node(state: AgentState) -> AgentState:
     anomaly = state["anomaly"]
-    sensor = state.get("sensor", {})
-    knowledge = state.get("knowledge", [])
-    staff_candidates = state.get("staff_candidates", [])
+    decision = state.get("agent_decision", {})
+    fallback = _fallback_analysis(anomaly)
 
-    analysis = _build_analysis(anomaly, sensor, knowledge, staff_candidates)
-    analysis["similar_cases"] = _compact_knowledge(knowledge)
+    analysis = {
+        "description": decision.get("description") or decision.get("reasoning") or fallback["description"],
+        "recommended_solution": (
+            decision.get("recommended_solution")
+            or decision.get("recommended_action")
+            or fallback["recommended_solution"]
+        ),
+        "similar_cases": decision.get("similar_cases") or fallback["similar_cases"],
+        "recommended_employee_id": (
+            decision.get("recommended_employee_id")
+            or fallback["recommended_employee_id"]
+        ),
+    }
 
     print("Analysis generated")
     return {**state, "analysis": analysis}
@@ -260,8 +203,7 @@ graph.add_node("fetch_anomaly", fetch_anomaly_node)
 graph.add_node("skip", skip_node)
 graph.add_node("fetch_sensor", fetch_sensor_node)
 graph.add_node("fetch_readings", fetch_readings_node)
-graph.add_node("search_knowledge", search_knowledge_node)
-graph.add_node("find_staff", find_staff_node)
+graph.add_node("investigation_agent", investigation_agent_node)
 graph.add_node("analyze", analyze_node)
 graph.add_node("patch_anomaly", patch_anomaly_node)
 
@@ -276,9 +218,8 @@ graph.add_conditional_edges(
 )
 graph.add_edge("skip", END)
 graph.add_edge("fetch_sensor", "fetch_readings")
-graph.add_edge("fetch_readings", "search_knowledge")
-graph.add_edge("search_knowledge", "find_staff")
-graph.add_edge("find_staff", "analyze")
+graph.add_edge("fetch_readings", "investigation_agent")
+graph.add_edge("investigation_agent", "analyze")
 graph.add_edge("analyze", "patch_anomaly")
 graph.add_edge("patch_anomaly", END)
 

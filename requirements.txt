@@ -6,6 +6,8 @@ uvicorn
 pydantic
 requests
 langgraph>=0.2.0
+langchain-core>=0.2.0
+langchain-groq>=0.1.0
 openai>=1.40.0
 google-genai>=1.0.0
 redis>=5.0.0
