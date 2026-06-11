@@ -106,20 +106,31 @@ enabled — supported on M0/Flex and dedicated tiers.
 
 Set `AGENT_DISPATCH=redis` in `.env` when using the queue (default is `stub`).
 
+**One command (redis + api + agent + simulator):**
+
 ```bash
-# Redis (separate terminal)
+pip install -r requirements.txt -r requirements-dev.txt
+./scripts/dev_up.sh
+# or: honcho start
+```
+
+Honcho starts Redis if it is not already running on `REDIS_URL` (default `:6379`).
+The simulator waits for `GET /health` before sending telemetry.
+Subset: `honcho start api agent` (no simulator; start Redis yourself or include `redis`).
+
+**Or separate terminals:**
+
+```bash
+# Redis (if not already running)
 redis-server
 
 # API
 uvicorn ingestor_service.app:app --reload --host 0.0.0.0 --port 8000
 
-# Agent worker (separate terminal) — blocks on Redis up to 20s per read
+# Agent worker — blocks on Redis up to 20s per read
 python -m agent_worker.main
 
-# Simulator (separate terminal) — generates telemetry that triggers anomalies
-python -m simulator_service.main --base-url http://localhost:8000 --tick-seconds 5
-
-# ...or force a guaranteed anomaly every 10 ticks for demos:
+# Simulator — guaranteed anomaly every 10 ticks for demos:
 python -m simulator_service.main --base-url http://localhost:8000 --deterministic-demo
 ```
 
