@@ -196,6 +196,10 @@ Base URL: `http://localhost:8000`. All responses are JSON with Mongo `_id` strip
 
 ### Knowledge curation (CRUD over `knowledge_base`)
 
+Resolution feedback enters `knowledge_base` as `is_active=false`,
+`curation_status="pending"` and is invisible to retrieval until a curator
+approves it — a guardrail against poisoning RAG with bad field notes.
+
 | Method | Path | Params / body | Use |
 |--------|------|---------------|-----|
 | `GET` | `/knowledge` | `is_active`, `equipment_type`, `source` (seed/feedback/manual), `limit`, `skip` | list entries; `?is_active=false&source=feedback` = **review queue** |
@@ -285,9 +289,16 @@ Full field contracts are documented inline in [scripts/init_db.py](scripts/init_
 No `embed()` helper — the service never computes a vector.
 
 **Closed loop:** resolving an anomaly with `outcome="fixed"` writes the
-resolution notes back into `knowledge_base` as `is_active=false`. A human curator
-must flip `is_active=true` before it influences retrieval — a guardrail against
-poisoning RAG with bad notes.
+resolution notes back into `knowledge_base` as `is_active=false`,
+`curation_status="pending"`. A human curator approves it via
+`POST /knowledge/{document_id}/activate` (see **Curation** above) before it
+influences retrieval — a guardrail against poisoning RAG with bad notes.
+
+### Migrations
+
+`python -m scripts.migrate_drop_embedding_fields` — one-off cleanup that
+`$unset`s the pre-autoEmbed `text_embedding` / `embedding_model` /
+`embedding_dimensions` fields from `knowledge_base`. Idempotent.
 
 ---
 

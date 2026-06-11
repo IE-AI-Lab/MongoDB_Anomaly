@@ -137,6 +137,11 @@ def patch_knowledge(document_id: str, patch: KnowledgePatch) -> dict[str, Any]:
     if not existing:
         raise HTTPException(404, "knowledge entry not found")
 
+    # Keep curation_status coherent with the curator's is_active decision so the
+    # review queue (is_active=false, curation_status="pending") drains correctly.
+    if "is_active" in update:
+        update["curation_status"] = "approved" if update["is_active"] else "pending"
+
     update["updated_at_utc"] = datetime.now(timezone.utc)
     col("knowledge_base").update_one({"document_id": document_id}, {"$set": update})
     return _strip_mongo_id(col("knowledge_base").find_one({"document_id": document_id}))

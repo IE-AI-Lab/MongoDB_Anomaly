@@ -265,6 +265,8 @@ def create_indexes(db: Database[dict[str, Any]]) -> None:
     knowledge_base.create_index([("document_id", ASCENDING)], unique=True)
     knowledge_base.create_index([("equipment_type", ASCENDING)])
     knowledge_base.create_index([("associated_error_codes", ASCENDING)])
+    # Curation review queue (api/knowledge.py list_knowledge ?is_active=false).
+    knowledge_base.create_index([("is_active", ASCENDING), ("curation_status", ASCENDING)])
 
     staff_on_call: Collection[dict[str, Any]] = db["staff_on_call"]
     # Earlier versions used handled_severity_types as an array. Normalize to a

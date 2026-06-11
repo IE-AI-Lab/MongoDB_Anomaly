@@ -59,6 +59,7 @@ def embed_resolution_into_knowledge(
         "text_content": text,
         "chunk_index": 0,
         "is_active": False,            # awaits curator review
+        "curation_status": "pending",  # pending -> approved (api/knowledge.py PATCH); deleted on reject
         "ingested_at_utc": now,
         "schema_version": 1,
         "source_metadata": {
