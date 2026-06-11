@@ -1,6 +1,6 @@
 """Closed RAG loop — feed field-resolution notes back into knowledge_base.
 
-Sync PyMongo variant. Imported by routes_write.py (step 06). New entries are
+Sync PyMongo variant. Imported by api/write.py. New entries are
 inserted with is_active=False so a human curator reviews them before they
 influence retrieval — a deliberate guardrail, since bad resolution notes would
 otherwise poison RAG forever. The data team owns the curation queue.
@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from .db import col
+from ..core.db import col
 
 
 def embed_resolution_into_knowledge(
@@ -59,7 +59,7 @@ def embed_resolution_into_knowledge(
         "text_content": text,
         "chunk_index": 0,
         "is_active": False,            # awaits curator review
-        "curation_status": "pending",  # pending -> approved | rejected (routes_curation.py)
+        "curation_status": "pending",  # pending -> approved (api/knowledge.py PATCH); deleted on reject
         "ingested_at_utc": now,
         "schema_version": 1,
         "source_metadata": {

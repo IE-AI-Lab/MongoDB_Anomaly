@@ -18,8 +18,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from . import config
-from .db import col
+from ..core import config
+from ..core.db import col
 
 log = logging.getLogger(__name__)
 

@@ -21,7 +21,7 @@ from pymongo.collection import Collection
 from pymongo.database import Database
 from pymongo.errors import CollectionInvalid, OperationFailure, PyMongoError
 
-from ingestor_service import config as svc_config
+from ingestor_service.core import config as svc_config
 from .knowledge_seed import KNOWLEDGE_SEED
 
 
@@ -265,7 +265,7 @@ def create_indexes(db: Database[dict[str, Any]]) -> None:
     knowledge_base.create_index([("document_id", ASCENDING)], unique=True)
     knowledge_base.create_index([("equipment_type", ASCENDING)])
     knowledge_base.create_index([("associated_error_codes", ASCENDING)])
-    # Curation queue (routes_curation.list_pending_knowledge).
+    # Curation review queue (api/knowledge.py list_knowledge ?is_active=false).
     knowledge_base.create_index([("is_active", ASCENDING), ("curation_status", ASCENDING)])
 
     staff_on_call: Collection[dict[str, Any]] = db["staff_on_call"]

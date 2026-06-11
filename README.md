@@ -15,12 +15,12 @@ API by the agent team — it lives elsewhere and is not in this repo.
 ```
  simulator_service ──HTTP──▶ ingestor_service (FastAPI) ──▶ MongoDB Atlas
                                    │                          ├ telemetry_history (time-series)
-                                   │                          ├ anomalies
+                                   ├ api/ (HTTP routers)      ├ anomalies
                                    ├ detector/ (thresholds,   ├ sensors
                                    │   severity, debounce)    ├ staff_on_call
-                                   ├ queue.py ──XADD──▶ Redis ├ knowledge_base  (+ vector index)
-                                   ├ rag.py ─$vectorSearch──▶ ├ system_metadata
-                                   └ routes_read / routes_write├ agent_execution_logs
+                                   ├ messaging/queue ─XADD─▶ Redis ├ knowledge_base (+ vector index)
+                                   ├ services/rag ─$vectorSearch─▶ ├ system_metadata
+                                   └ core/ (config, db)        ├ agent_execution_logs
                                                                └ session_events
         agent_worker ──XREADGROUP──▶ Redis (anomaly:jobs)
               │
@@ -49,7 +49,7 @@ Copy `.env.example` → `.env` and fill in:
 
 ```bash
 MONGO_URI="mongodb+srv://<user>:<password>@<cluster>.mongodb.net/"
-DB_NAME="anomaly_detection"
+DB_NAME="anomaly_db"
 
 # Embeddings — managed by Atlas (Voyage AI); no key needed.
 # Must match the model set in the knowledge_vector autoEmbed index.
@@ -111,7 +111,7 @@ Set `AGENT_DISPATCH=redis` in `.env` when using the queue (default is `stub`).
 redis-server
 
 # API
-uvicorn ingestor_service.api:app --reload --host 0.0.0.0 --port 8000
+uvicorn ingestor_service.app:app --reload --host 0.0.0.0 --port 8000
 
 # Agent worker (separate terminal) — blocks on Redis up to 20s per read
 python -m agent_worker.main
@@ -194,17 +194,25 @@ Base URL: `http://localhost:8000`. All responses are JSON with Mongo `_id` strip
 | `POST` | `/anomalies/{anomaly_id}/assign` | `{employee_id}` | assigns staff, sets `assigned`, flips staff `is_on_call→false` |
 | `POST` | `/anomalies/{anomaly_id}/resolve` | `{outcome, resolution_notes, resolved_by?}` | sets `resolved`, frees staff; if `outcome=="fixed"`, embeds notes into `knowledge_base` and returns `knowledge_document_id` |
 
-### Curation (human reviews the closed RAG loop)
+### Knowledge curation (CRUD over `knowledge_base`)
 
 Resolution feedback enters `knowledge_base` as `is_active=false`,
 `curation_status="pending"` and is invisible to retrieval until a curator
 approves it — a guardrail against poisoning RAG with bad field notes.
 
+| Method | Path | Params / body | Use |
+|--------|------|---------------|-----|
+| `GET` | `/knowledge` | `is_active`, `equipment_type`, `source` (seed/feedback/manual), `limit`, `skip` | list entries; `?is_active=false&source=feedback` = **review queue** |
+| `GET` | `/knowledge/{document_id}` | — | one entry |
+| `POST` | `/knowledge` | `{section_title, text_content, equipment_type?, associated_error_codes?, is_active?}` | create manual entry (`kb-` id); Atlas autoEmbed indexes it |
+| `PATCH` | `/knowledge/{document_id}` | any subset of the create fields | curator **approves** feedback with `{"is_active": true}` |
+| `DELETE` | `/knowledge/{document_id}` | — | hard delete — curator **rejects** a feedback entry |
+
+### Admin (dev/demo)
+
 | Method | Path | Body | Effect |
 |--------|------|------|--------|
-| `GET`  | `/knowledge/pending` | `limit` (1–500) | list docs awaiting review, newest first |
-| `POST` | `/knowledge/{document_id}/activate` | `{curator_id?}` | approve → `is_active=true`, enters retrieval |
-| `POST` | `/knowledge/{document_id}/reject` | `{curator_id?, reason?}` | reject → stays inactive, marked `rejected` |
+| `POST` | `/simulation/reset` | `{purge_feedback_knowledge?: false}` | purges anomalies, telemetry, agent logs, session events; restores all staff to on-call; trims the Redis job stream; seed data untouched. Restart the simulator to reset its sequence counters. |
 
 #### Example agent flow
 
@@ -300,7 +308,7 @@ The chat model is OpenAI-compatible, so point the OpenAI SDK at Groq:
 
 ```python
 from openai import OpenAI
-from ingestor_service import config
+from ingestor_service.core import config
 
 client = OpenAI(api_key=config.groq_api_key(), base_url=config.groq_base_url())
 resp = client.chat.completions.create(
@@ -317,20 +325,28 @@ resp = client.chat.completions.create(
 scripts/
   init_db.py                Idempotent DB setup + seed (run once)
   knowledge_seed.py         14-entry knowledge corpus
-ingestor_service/
-  api.py                    FastAPI app; registers read+write routers
-  config.py                 Env accessors (Mongo, Voyage model, Groq)
-  db.py                     Sync PyMongo client + col() helper + indexes
+ingestor_service/           Data layer (run: uvicorn ingestor_service.app:app)
+  app.py                    FastAPI app; mounts api/all_routers + startup hooks
   models.py                 Telemetry ingestion Pydantic contract
-  ingest.py                 Persist telemetry
-  rag.py                    search_knowledge() (Atlas autoEmbed)
-  routes_read.py            GET endpoints (agent reads)
-  routes_write.py           PATCH/POST endpoints (agent/manager/staff writes)
-  feedback_to_knowledge.py  Closed RAG loop
-  queue.py                  XADD anomaly jobs to Redis Streams
-  agent_stub.py             stdout stub when AGENT_DISPATCH=stub
+  core/
+    config.py               Env accessors (Mongo, Voyage model, Groq, Redis)
+    db.py                   Sync PyMongo client + col() helper + indexes
+  api/                      Thin HTTP routers
+    telemetry.py            POST /ingest/telemetry, GET /health
+    read.py                 GET endpoints (agent reads)
+    write.py                PATCH/POST endpoints (agent/manager/staff writes)
+    knowledge.py            knowledge_base CRUD + curation review queue
+    agent_logs.py           POST/GET /agent_logs (agent run traces)
+    admin.py                POST /simulation/reset (demo state purge)
+  services/                 Domain logic (no HTTP)
+    ingest.py               Persist telemetry
+    rag.py                  search_knowledge() (Atlas autoEmbed)
+    feedback_to_knowledge.py  Closed RAG loop
+    severity_engine.py      breach_ratio → severity_level / severity_type
+  messaging/
+    queue.py                XADD anomaly jobs to Redis Streams
+    agent_stub.py           stdout stub when AGENT_DISPATCH=stub
   detector/                 Thresholds, severity, state, detection
-  severity_engine.py        breach_ratio → severity_level / severity_type
 agent_worker/               Redis consumer (python -m agent_worker.main)
   consumer.py               XREADGROUP loop + process_anomaly_job hook
 simulator_service/          Telemetry generator

@@ -1,12 +1,9 @@
 """Write endpoints — agent commits analysis, manager assigns, staff resolves.
 
 Sync PyMongo variant. Endpoints are plain `def` (FastAPI threadpools blocking
-IO). Registered in api.py:
+IO). Mounted via api/__init__.py's `all_routers`.
 
-    from .routes_write import router as write_router
-    app.include_router(write_router)
-
-Depends on: ingestor_service/feedback_to_knowledge.py (step 07).
+Depends on: services/feedback_to_knowledge.py (closed RAG loop).
 """
 from __future__ import annotations
 
@@ -16,8 +13,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from .db import col
-from .feedback_to_knowledge import embed_resolution_into_knowledge
+from ..core.db import col
+from ..services.feedback_to_knowledge import embed_resolution_into_knowledge
 
 router = APIRouter(tags=["write"])
 

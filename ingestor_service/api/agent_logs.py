@@ -1,10 +1,7 @@
 """Agent run-trace endpoints — the agent worker POSTs its execution traces here.
 
 Sync PyMongo variant. Endpoints are plain `def` (FastAPI threadpools blocking
-IO). Registered in api.py:
-
-    from .routes_agent_logs import router as agent_logs_router
-    app.include_router(agent_logs_router)
+IO). Mounted via api/__init__.py's `all_routers`.
 
 Why an endpoint (and not the worker writing Mongo directly)? The agent worker is
 a decoupled process that talks to the data layer over HTTP only (see
@@ -24,7 +21,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from .db import col
+from ..core.db import col
 
 router = APIRouter(tags=["agent-logs"])
 

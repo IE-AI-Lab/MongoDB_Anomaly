@@ -15,9 +15,9 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import uuid4
 
-from ..severity_engine import build_anomaly_severity_fields
-from ..queue import dispatch_anomaly
-from ..db import col
+from ..services.severity_engine import build_anomaly_severity_fields
+from ..messaging.queue import dispatch_anomaly
+from ..core.db import col
 from .state import get_counter
 from .thresholds import Threshold, get_threshold
 

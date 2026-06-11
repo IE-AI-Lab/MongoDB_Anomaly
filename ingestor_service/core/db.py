@@ -107,7 +107,7 @@ def ensure_indexes() -> None:
     # recency fallback. (No source_type index — no document carries that field.)
     db["knowledge_base"].create_index([("equipment_type", ASCENDING)])
     db["knowledge_base"].create_index([("associated_error_codes", ASCENDING)])
-    # Curation queue (routes_curation.list_pending_knowledge).
+    # Curation review queue (api/knowledge.py list_knowledge ?is_active=false).
     db["knowledge_base"].create_index([("is_active", ASCENDING), ("curation_status", ASCENDING)])
 
     db["sensors"].create_index([("sensor_id", ASCENDING)], unique=True)

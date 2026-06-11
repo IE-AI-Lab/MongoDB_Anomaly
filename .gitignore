@@ -29,3 +29,6 @@ DATABASE_REPORT.pdf
 # Cursor / canvas artifacts (local only)
 canvases/
 *.canvas.status.json
+
+# Local agent memory/settings (Claude Code)
+.claude/
