@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from ingestor_service import routes_knowledge
+from ingestor_service.api import knowledge as routes_knowledge
 
 from tests.fakes import FakeDB
 

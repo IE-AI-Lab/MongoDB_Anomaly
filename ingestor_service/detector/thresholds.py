@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from ..db import col
+from ..core.db import col
 
 
 Direction = Literal["above", "below"]

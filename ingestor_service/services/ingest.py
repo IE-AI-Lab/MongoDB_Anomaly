@@ -12,8 +12,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from .db import col
-from .models import TelemetryIngestEvent
+from ..core.db import col
+from ..models import TelemetryIngestEvent
 
 
 def utc_now() -> datetime:

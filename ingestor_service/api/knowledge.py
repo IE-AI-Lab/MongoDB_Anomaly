@@ -1,10 +1,7 @@
 """Knowledge curation endpoints — CRUD over `knowledge_base`.
 
 Sync PyMongo variant. Endpoints are plain `def` (FastAPI threadpools blocking
-IO). Registered in api.py:
-
-    from .routes_knowledge import router as knowledge_router
-    app.include_router(knowledge_router)
+IO). Mounted via api/__init__.py's `all_routers`.
 
 Why these exist: feedback entries land in `knowledge_base` with is_active=False
 (see feedback_to_knowledge.py) awaiting human curation. Until now there was no
@@ -17,10 +14,10 @@ API to act on that queue — these endpoints make the guardrail real:
 Embeddings are managed by Atlas autoEmbed — we only ever store `text_content`;
 the `knowledge_vector` index picks up inserts/updates automatically.
 
-ROUTE-ORDERING NOTE: `GET /knowledge/search` lives in routes_read.py and its
-router is registered BEFORE this one in api.py — that ordering is what keeps
-the literal `/knowledge/search` from being captured by `/knowledge/{document_id}`
-here. Do not reorder the include_router calls.
+ROUTE-ORDERING NOTE: `GET /knowledge/search` lives in api/read.py, whose router
+sits BEFORE this one in api/__init__.py's `all_routers` — that ordering keeps the
+literal `/knowledge/search` from being captured by `/knowledge/{document_id}`
+here. Do not reorder `all_routers`.
 """
 from __future__ import annotations
 
@@ -31,7 +28,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from .db import col
+from ..core.db import col
 
 router = APIRouter(tags=["knowledge"])
 
@@ -99,7 +96,7 @@ def list_knowledge(
 
 @router.get("/knowledge/{document_id}")
 def get_knowledge(document_id: str) -> dict[str, Any]:
-    # NB: never matches "search" — routes_read.py's /knowledge/search registers first.
+    # NB: never matches "search" — api/read.py's /knowledge/search registers first.
     doc = col("knowledge_base").find_one({"document_id": document_id})
     if not doc:
         raise HTTPException(404, "knowledge entry not found")

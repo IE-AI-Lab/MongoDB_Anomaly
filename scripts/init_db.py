@@ -21,7 +21,7 @@ from pymongo.collection import Collection
 from pymongo.database import Database
 from pymongo.errors import CollectionInvalid, OperationFailure, PyMongoError
 
-from ingestor_service import config as svc_config
+from ingestor_service.core import config as svc_config
 from .knowledge_seed import KNOWLEDGE_SEED
 
 

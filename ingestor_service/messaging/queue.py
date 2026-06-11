@@ -12,7 +12,7 @@ import logging
 from datetime import datetime
 from typing import Any, Optional
 
-from . import config
+from ..core import config
 from .agent_stub import handle_anomaly
 
 log = logging.getLogger(__name__)

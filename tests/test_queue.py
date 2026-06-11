@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from ingestor_service import config, queue
+from ingestor_service.core import config
+from ingestor_service.messaging import queue
 
 
 class _FakeRedis:

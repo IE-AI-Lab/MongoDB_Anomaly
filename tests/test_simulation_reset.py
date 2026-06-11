@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from ingestor_service import routes_admin
+from ingestor_service.api import admin as routes_admin
 
 from tests.fakes import FakeDB
 

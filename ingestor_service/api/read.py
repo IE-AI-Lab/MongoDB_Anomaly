@@ -3,10 +3,8 @@
 Sync PyMongo variant. Endpoints are plain `def` — FastAPI runs sync handlers
 in a threadpool, which is correct for blocking PyMongo IO.
 
-Registered in api.py:
-
-    from .routes_read import router as read_router
-    app.include_router(read_router)
+Mounted via api/__init__.py's `all_routers` (read before knowledge, so the
+literal /knowledge/search here is not shadowed by /knowledge/{document_id}).
 """
 from __future__ import annotations
 
@@ -15,8 +13,8 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from .db import col
-from .rag import search_knowledge
+from ..core.db import col
+from ..services.rag import search_knowledge
 
 router = APIRouter(tags=["read"])
 

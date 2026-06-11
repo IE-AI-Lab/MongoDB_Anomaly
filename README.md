@@ -15,12 +15,12 @@ API by the agent team — it lives elsewhere and is not in this repo.
 ```
  simulator_service ──HTTP──▶ ingestor_service (FastAPI) ──▶ MongoDB Atlas
                                    │                          ├ telemetry_history (time-series)
-                                   │                          ├ anomalies
+                                   ├ api/ (HTTP routers)      ├ anomalies
                                    ├ detector/ (thresholds,   ├ sensors
                                    │   severity, debounce)    ├ staff_on_call
-                                   ├ queue.py ──XADD──▶ Redis ├ knowledge_base  (+ vector index)
-                                   ├ rag.py ─$vectorSearch──▶ ├ system_metadata
-                                   └ routes_read / routes_write├ agent_execution_logs
+                                   ├ messaging/queue ─XADD─▶ Redis ├ knowledge_base (+ vector index)
+                                   ├ services/rag ─$vectorSearch─▶ ├ system_metadata
+                                   └ core/ (config, db)        ├ agent_execution_logs
                                                                └ session_events
         agent_worker ──XREADGROUP──▶ Redis (anomaly:jobs)
               │
@@ -111,7 +111,7 @@ Set `AGENT_DISPATCH=redis` in `.env` when using the queue (default is `stub`).
 redis-server
 
 # API
-uvicorn ingestor_service.api:app --reload --host 0.0.0.0 --port 8000
+uvicorn ingestor_service.app:app --reload --host 0.0.0.0 --port 8000
 
 # Agent worker (separate terminal) — blocks on Redis up to 20s per read
 python -m agent_worker.main
@@ -297,7 +297,7 @@ The chat model is OpenAI-compatible, so point the OpenAI SDK at Groq:
 
 ```python
 from openai import OpenAI
-from ingestor_service import config
+from ingestor_service.core import config
 
 client = OpenAI(api_key=config.groq_api_key(), base_url=config.groq_base_url())
 resp = client.chat.completions.create(
@@ -314,23 +314,28 @@ resp = client.chat.completions.create(
 scripts/
   init_db.py                Idempotent DB setup + seed (run once)
   knowledge_seed.py         14-entry knowledge corpus
-ingestor_service/
-  api.py                    FastAPI app; registers all routers
-  config.py                 Env accessors (Mongo, Voyage model, Groq)
-  db.py                     Sync PyMongo client + col() helper + indexes
+ingestor_service/           Data layer (run: uvicorn ingestor_service.app:app)
+  app.py                    FastAPI app; mounts api/all_routers + startup hooks
   models.py                 Telemetry ingestion Pydantic contract
-  ingest.py                 Persist telemetry
-  rag.py                    search_knowledge() (Atlas autoEmbed)
-  routes_read.py            GET endpoints (agent reads)
-  routes_write.py           PATCH/POST endpoints (agent/manager/staff writes)
-  routes_agent_logs.py      POST/GET /agent_logs (agent run traces)
-  routes_knowledge.py       knowledge_base CRUD + curation review queue
-  routes_admin.py           POST /simulation/reset (demo state purge)
-  feedback_to_knowledge.py  Closed RAG loop
-  queue.py                  XADD anomaly jobs to Redis Streams
-  agent_stub.py             stdout stub when AGENT_DISPATCH=stub
+  core/
+    config.py               Env accessors (Mongo, Voyage model, Groq, Redis)
+    db.py                   Sync PyMongo client + col() helper + indexes
+  api/                      Thin HTTP routers
+    telemetry.py            POST /ingest/telemetry, GET /health
+    read.py                 GET endpoints (agent reads)
+    write.py                PATCH/POST endpoints (agent/manager/staff writes)
+    knowledge.py            knowledge_base CRUD + curation review queue
+    agent_logs.py           POST/GET /agent_logs (agent run traces)
+    admin.py                POST /simulation/reset (demo state purge)
+  services/                 Domain logic (no HTTP)
+    ingest.py               Persist telemetry
+    rag.py                  search_knowledge() (Atlas autoEmbed)
+    feedback_to_knowledge.py  Closed RAG loop
+    severity_engine.py      breach_ratio → severity_level / severity_type
+  messaging/
+    queue.py                XADD anomaly jobs to Redis Streams
+    agent_stub.py           stdout stub when AGENT_DISPATCH=stub
   detector/                 Thresholds, severity, state, detection
-  severity_engine.py        breach_ratio → severity_level / severity_type
 agent_worker/               Redis consumer (python -m agent_worker.main)
   consumer.py               XREADGROUP loop + process_anomaly_job hook
 simulator_service/          Telemetry generator

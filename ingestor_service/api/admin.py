@@ -1,10 +1,7 @@
 """Admin endpoints — demo/MVP utilities. Currently: POST /simulation/reset.
 
 Sync PyMongo variant. Endpoints are plain `def` (FastAPI threadpools blocking
-IO). Registered in api.py:
-
-    from .routes_admin import router as admin_router
-    app.include_router(admin_router)
+IO). Mounted via api/__init__.py's `all_routers`.
 
 The reset purges runtime state (anomalies, telemetry, agent traces, session
 events) and restores the full staff roster to on-call, while leaving seed data
@@ -22,8 +19,8 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from . import queue
-from .db import col
+from ..messaging import queue
+from ..core.db import col
 
 router = APIRouter(tags=["admin"])
 

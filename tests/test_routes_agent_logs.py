@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from ingestor_service import routes_agent_logs
+from ingestor_service.api import agent_logs as routes_agent_logs
 
 from tests.fakes import FakeDB
 
