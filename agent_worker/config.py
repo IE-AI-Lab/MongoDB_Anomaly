@@ -42,7 +42,14 @@ def groq_api_key() -> str:
 
 
 def groq_base_url() -> str:
+    """OpenAI-compatible endpoint — for the OpenAI SDK only."""
     return os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+
+
+def groq_native_api_base() -> str:
+    """Native Groq API root — for langchain_groq.ChatGroq (no /openai/v1 suffix)."""
+    raw = os.getenv("GROQ_API_BASE") or os.getenv("GROQ_BASE_URL", "https://api.groq.com")
+    return raw.removesuffix("/openai/v1").rstrip("/")
 
 
 def chat_model() -> str:
@@ -52,4 +59,4 @@ def chat_model() -> str:
 # --- Agent identity (written into agent_execution_logs traces) ----------------
 
 AGENT_NAME = "mongodb-anomaly-agent"
-AGENT_VERSION = "0.1.0"
+AGENT_VERSION = "0.2.0"
