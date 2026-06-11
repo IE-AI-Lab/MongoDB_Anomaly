@@ -3,15 +3,17 @@ from typing import Any
 
 from . import config
 from .agent_tools import (
-    query_rag_knowledge_base,
+    get_sensor_readings,
     get_staff_contact,
-    retrieve_recent_alerts,
+    query_rag_knowledge_base,
     retrieve_machine_memory,
+    retrieve_recent_alerts,
 )
 
 agent_tools = [
     query_rag_knowledge_base,
     get_staff_contact,
+    get_sensor_readings,
     retrieve_recent_alerts,
     retrieve_machine_memory,
 ]
@@ -29,8 +31,9 @@ You operate in a loop:
 
 You have tools for:
 - writing and sending your own RAG query to the backend /knowledge/search endpoint
+- fetching more telemetry (get_sensor_readings) when bootstrap readings are insufficient
 - retrieving previous alerts
-- retrieving persistent machine memory
+- retrieving persistent machine memory (sensor + readings + past anomalies)
 - calling the backend /staff_on_call endpoint
 
 Important behavior:
@@ -164,12 +167,14 @@ Anomaly:
 Sensor metadata:
 {json.dumps(sensor, default=str)}
 
-Recent readings:
-{json.dumps(readings[-20:], default=str)}
+Recent readings (bootstrap — call retrieve_machine_memory or get_sensor_readings for more):
+{json.dumps(readings[-10:], default=str)}
 
 Investigate this event using the available tools. You must write your own RAG
 query and call query_rag_knowledge_base. If you recommend an assignee, call
 get_staff_contact with the best specialization/severity/facility filters.
+Call retrieve_machine_memory, retrieve_recent_alerts, or get_sensor_readings
+when you need more history than the bootstrap readings above.
 Return final JSON only.
 """
 

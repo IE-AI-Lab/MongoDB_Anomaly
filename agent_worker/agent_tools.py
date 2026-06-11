@@ -103,6 +103,37 @@ def get_staff_contact(
 
 
 @tool
+def get_sensor_readings(
+    sensor_id: str,
+    minutes: int = 60,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """
+    Fetch recent telemetry for a sensor when the bootstrap readings are not enough.
+
+    Use a larger minutes/limit to inspect longer trends or more data points.
+    """
+    minutes = max(1, min(int(minutes), 24 * 60))
+    limit = max(1, min(int(limit), 500))
+    try:
+        readings = _get(
+            f"/sensors/{sensor_id}/readings",
+            minutes=minutes,
+            limit=limit,
+        )
+    except requests.RequestException as exc:
+        return {"error": str(exc), "sensor_id": sensor_id, "readings": []}
+
+    return {
+        "sensor_id": sensor_id,
+        "minutes": minutes,
+        "limit": limit,
+        "count": len(readings),
+        "readings": readings,
+    }
+
+
+@tool
 def retrieve_recent_alerts(sensor_id: str) -> dict[str, Any]:
     """
     Retrieve recent anomaly records for this sensor from the backend API.

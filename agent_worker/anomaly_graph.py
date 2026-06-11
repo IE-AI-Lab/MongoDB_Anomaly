@@ -203,13 +203,14 @@ def fetch_sensor_node(state: AgentState) -> AgentState:
 
 @_traced("fetch_readings")
 def fetch_readings_node(state: AgentState) -> AgentState:
+    """Bootstrap with a small telemetry slice — agent tools can fetch more."""
     sensor_id = state["anomaly"]["sensor_id"]
     readings = _client(state).get(
         f"/sensors/{sensor_id}/readings",
         minutes=60,
-        limit=200,
+        limit=10,
     )
-    log.info("fetched %s recent readings for %s", len(readings), sensor_id)
+    log.info("fetched %s bootstrap readings for %s", len(readings), sensor_id)
     return {**state, "readings": readings}
 
 
