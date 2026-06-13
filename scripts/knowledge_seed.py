@@ -55,6 +55,32 @@ KNOWLEDGE_SEED: list[dict] = [
             "technicians to each location."
         ),
     },
+    {
+        "section_title": "High temperature in control room / server space",
+        "equipment_type": "control_room",
+        "associated_error_codes": ["TEMP_HIGH", "COOLING_FAULT"],
+        "text_content": (
+            "Rising temperature in a control room or server space almost always "
+            "points at the CRAC/CRAH unit rather than the IT load. Check that the "
+            "unit is cooling and not stuck in fan-only mode, and verify supply-air "
+            "temperature at the floor grille. If supply air is cold but room "
+            "temperature still climbs, suspect blocked airflow — raised-floor "
+            "obstructions, a failed in-row fan, or hot-aisle recirculation."
+        ),
+    },
+    {
+        "section_title": "Packaging room humidity rising above limit",
+        "equipment_type": "packaging_room",
+        "associated_error_codes": ["HUMIDITY_HIGH"],
+        "text_content": (
+            "Humidity climbing in a packaging room risks condensation on product "
+            "and film, and is usually an HVAC dehumidification fault or infiltration "
+            "of outside air. Check that make-up air dampers are not stuck open and "
+            "that the dehumidifier or AHU cooling coil is reaching setpoint. "
+            "Confirm dock doors and wall penetrations are sealed before suspecting "
+            "the dehumidifier itself."
+        ),
+    },
     # --- vibration ---
     {
         "section_title": "Pump bearing vibration above 4.5 mm/s",
