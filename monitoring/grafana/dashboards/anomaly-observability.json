@@ -57,7 +57,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(http_server_duration_milliseconds_count{http_route=~\"/ingest/telemetry|/ingest/telemetry/\"}[1m]))",
+          "expr": "sum(rate(http_server_duration_milliseconds_count{http_target=\"/ingest/telemetry\"}[1m]))",
           "legendFormat": "ingest req/s",
           "range": true,
           "refId": "A"
@@ -203,6 +203,103 @@
         }
       ],
       "title": "Agent Failures",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (http_method, http_target) (rate(http_server_duration_milliseconds_count[1m]))",
+          "legendFormat": "{{http_method}} {{http_target}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "API Requests by Route (req/s)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max(anomaly_stream_pending)",
+          "legendFormat": "pending (unacked)",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(anomaly_stream_length)",
+          "legendFormat": "stream length",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Redis Queue (anomaly:jobs)",
       "type": "timeseries"
     }
   ],

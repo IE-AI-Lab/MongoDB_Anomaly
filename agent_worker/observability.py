@@ -13,6 +13,8 @@ log = logging.getLogger(__name__)
 _otel_ready = False
 _jobs_counter: Any = None
 _job_duration_hist: Any = None
+_queue_gauges_registered = False
+_redis_client: Any = None
 
 
 def init_langsmith() -> None:
@@ -70,8 +72,70 @@ def _configure_otel() -> bool:
     return True
 
 
+def _get_redis_client() -> Any:
+    global _redis_client
+    if _redis_client is None:
+        import redis
+
+        _redis_client = redis.Redis.from_url(
+            config.redis_url(),
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
+    return _redis_client
+
+
+def _observe_stream_length(_options: Any):
+    from opentelemetry.metrics import Observation
+
+    stream = config.anomaly_stream_key()
+    try:
+        length = _get_redis_client().xlen(stream)
+    except Exception:  # noqa: BLE001 — metrics must never break the worker
+        return []
+    return [Observation(length, {"stream": stream})]
+
+
+def _observe_stream_pending(_options: Any):
+    from opentelemetry.metrics import Observation
+
+    stream = config.anomaly_stream_key()
+    group = config.anomaly_consumer_group()
+    try:
+        info = _get_redis_client().xpending(stream, group)
+        pending = info.get("pending", 0) if isinstance(info, dict) else 0
+    except Exception:  # noqa: BLE001 — group may not exist yet / redis down
+        return []
+    return [Observation(pending, {"stream": stream, "group": group})]
+
+
+def _register_queue_gauges() -> None:
+    global _queue_gauges_registered
+    if _queue_gauges_registered:
+        return
+
+    from opentelemetry import metrics
+
+    meter = metrics.get_meter("agent_worker.queue")
+    meter.create_observable_gauge(
+        "anomaly_stream_length",
+        callbacks=[_observe_stream_length],
+        description="Total entries in the anomaly Redis stream",
+        unit="1",
+    )
+    meter.create_observable_gauge(
+        "anomaly_stream_pending",
+        callbacks=[_observe_stream_pending],
+        description="Unacknowledged (pending) jobs for the consumer group",
+        unit="1",
+    )
+    _queue_gauges_registered = True
+
+
 def setup_worker_observability() -> None:
-    _configure_otel()
+    if _configure_otel():
+        _register_queue_gauges()
 
 
 def record_job_processed(result: str, duration_seconds: float) -> None:

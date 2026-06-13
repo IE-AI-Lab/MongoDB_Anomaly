@@ -207,6 +207,8 @@ Dashboard panels:
 - **Anomalies Created:** detector anomaly creation rate.
 - **Agent Job Duration p95 (s):** p95 worker processing latency.
 - **Agent Failures:** failure rate for worker jobs left pending for retry.
+- **API Requests by Route (req/s):** per-endpoint request rate (FastAPI auto-instrumentation).
+- **Redis Queue (anomaly:jobs):** stream length and unacknowledged (pending) jobs for the consumer group.
 
 ---
 
