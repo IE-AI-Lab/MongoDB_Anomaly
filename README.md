@@ -330,6 +330,25 @@ resp = client.chat.completions.create(
 
 ---
 
+## Agent debugging with LangSmith
+
+Enable LangSmith tracing for the `agent_worker` process to inspect full ReAct
+execution (tool calls, tool payloads, and final JSON decision):
+
+```bash
+# in .env
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=...
+LANGCHAIN_PROJECT=mongodb-anomaly-agent
+```
+
+Then run the stack (`honcho start` or `python -m agent_worker.main`) and trigger
+an anomaly. In LangSmith, open the `mongodb-anomaly-agent` project, filter runs
+by `anomaly_id`, and inspect the trace to see ReAct tool spans (`query_rag_knowledge_base`,
+`get_staff_contact`, `get_sensor_readings`, etc.).
+
+---
+
 ## Module map
 
 ```

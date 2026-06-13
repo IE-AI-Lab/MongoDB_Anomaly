@@ -7,10 +7,12 @@ import logging
 from dotenv import load_dotenv
 
 from .consumer import run_consumer
+from .observability import init_langsmith
 
 
 def main() -> None:
     load_dotenv()
+    init_langsmith()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s [agent_worker] %(message)s",

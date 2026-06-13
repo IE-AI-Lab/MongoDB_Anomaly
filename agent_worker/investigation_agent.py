@@ -155,6 +155,7 @@ def run_investigation_agent(
     anomaly: dict[str, Any],
     sensor: dict[str, Any],
     readings: list[dict[str, Any]],
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     agent_app = _build_agent_app()
     if agent_app is None:
@@ -179,6 +180,11 @@ Return final JSON only.
 """
 
     try:
+        tags = ["anomaly-investigation"]
+        error_code = anomaly.get("error_code")
+        if error_code:
+            tags.append(str(error_code))
+
         result = agent_app.invoke(
             {
                 "messages": [
@@ -188,7 +194,17 @@ Return final JSON only.
                     }
                 ]
             },
-            config={"recursion_limit": 8},
+            config={
+                "recursion_limit": 8,
+                "run_name": "investigation_agent",
+                "tags": tags,
+                "metadata": {
+                    "anomaly_id": anomaly.get("anomaly_id"),
+                    "sensor_id": anomaly.get("sensor_id"),
+                    "error_code": anomaly.get("error_code"),
+                    "run_id": run_id,
+                },
+            },
         )
     except Exception as exc:  # noqa: BLE001 — Groq/network errors should not fail the job
         fallback = _fallback_decision(anomaly)
