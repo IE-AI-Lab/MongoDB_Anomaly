@@ -115,3 +115,15 @@ def anomaly_consumer_group() -> str:
 def anomaly_stream_maxlen() -> int:
     return int(os.getenv("ANOMALY_STREAM_MAXLEN", "10000"))
 
+
+def otel_enabled() -> bool:
+    return os.getenv("OTEL_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def otel_exporter_otlp_endpoint() -> str:
+    return os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+
+
+def otel_service_name(default: str = "ingestor_service") -> str:
+    return os.getenv("OTEL_SERVICE_NAME", default)
+

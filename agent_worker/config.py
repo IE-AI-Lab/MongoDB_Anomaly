@@ -56,6 +56,18 @@ def chat_model() -> str:
     return os.getenv("CHAT_MODEL", "llama-3.3-70b-versatile")
 
 
+def otel_enabled() -> bool:
+    return os.getenv("OTEL_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def otel_exporter_otlp_endpoint() -> str:
+    return os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+
+
+def otel_service_name(default: str = "agent_worker") -> str:
+    return os.getenv("OTEL_SERVICE_NAME", default)
+
+
 # --- Agent identity (written into agent_execution_logs traces) ----------------
 
 AGENT_NAME = "mongodb-anomaly-agent"
