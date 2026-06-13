@@ -122,13 +122,11 @@ def _register_queue_gauges() -> None:
         "anomaly_stream_length",
         callbacks=[_observe_stream_length],
         description="Total entries in the anomaly Redis stream",
-        unit="1",
     )
     meter.create_observable_gauge(
         "anomaly_stream_pending",
         callbacks=[_observe_stream_pending],
         description="Unacknowledged (pending) jobs for the consumer group",
-        unit="1",
     )
     _queue_gauges_registered = True
 

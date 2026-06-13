@@ -102,13 +102,13 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(anomalies_created_total[1m]))",
-          "legendFormat": "anomalies/s",
+          "expr": "sum by (error_code) (anomalies_created_total)",
+          "legendFormat": "{{error_code}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Anomalies Created",
+      "title": "Anomalies Created (cumulative by error code)",
       "type": "timeseries"
     },
     {
