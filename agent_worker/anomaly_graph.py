@@ -222,6 +222,7 @@ def investigation_agent_node(state: AgentState) -> AgentState:
         state["anomaly"],
         state.get("sensor", {}),
         state.get("readings", []),
+        run_id=state.get("run_id"),
     )
     log.info(
         "investigation complete decision=%s confidence=%s rag_query=%s",
