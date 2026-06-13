@@ -154,6 +154,62 @@ pytest
 
 GitHub Actions runs this same test command on every push to `main` and every pull request.
 
+### Evaluation
+
+For demo-ready regression coverage, we ship a compact eval suite under
+`tests/evals/`:
+
+- **RAG retrieval evals** validate that representative anomaly queries
+  (temperature, vibration, pressure, flow, humidity) retrieve at least one
+  matching knowledge document.
+- **Agent output evals** run `run_investigation_agent()` with a mocked ReAct app
+  (no live API calls) and assert JSON schema quality: non-empty
+  `description`/`recommended_solution` and traceable `rag_query_used`.
+- **DeepEval judge metric (optional live mode)** runs only when
+  `DEEPEVAL_LIVE=1` and `OPENAI_API_KEY` are set.
+
+Run evals:
+
+```bash
+pytest tests/evals/
+```
+
+Optional live metric coverage:
+
+| Metric | Default in CI | Live mode |
+|--------|----------------|-----------|
+| Answer Relevancy | skipped | `DEEPEVAL_LIVE=1 OPENAI_API_KEY=...` |
+| Faithfulness | documented target | can be added with same live toggle |
+| Contextual Recall | documented target | can be added with same live toggle |
+
+---
+
+## Monitoring
+
+Minimal demo stack: OpenTelemetry (in app + worker) + OTEL Collector +
+Prometheus + Grafana.
+
+Quickstart:
+
+1. Install observability packages:
+   `pip install -r requirements.txt -r requirements-observability.txt`
+2. Start monitoring services:
+   `docker compose -f monitoring/docker-compose.observability.yml up`
+3. Enable OTEL in `.env`:
+   `OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317`
+4. Run app + worker + simulator (`honcho start` or separate processes).
+5. Open Grafana at [http://localhost:3000](http://localhost:3000)
+   (default `admin` / `admin`) and open **Anomaly Pipeline Monitoring**.
+
+Dashboard panels:
+
+- **Ingest Rate (req/s):** request throughput on telemetry ingestion route.
+- **Anomalies Created:** detector anomaly creation rate.
+- **Agent Job Duration p95 (s):** p95 worker processing latency.
+- **Agent Failures:** failure rate for worker jobs left pending for retry.
+- **API Requests by Route (req/s):** per-endpoint request rate (FastAPI auto-instrumentation).
+- **Redis Queue (anomaly:jobs):** stream length and unacknowledged (pending) jobs for the consumer group.
+
 ---
 
 ## Anomaly lifecycle
@@ -327,6 +383,25 @@ resp = client.chat.completions.create(
     messages=[{"role": "user", "content": "..."}],
 )
 ```
+
+---
+
+## Agent debugging with LangSmith
+
+Enable LangSmith tracing for the `agent_worker` process to inspect full ReAct
+execution (tool calls, tool payloads, and final JSON decision):
+
+```bash
+# in .env
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=...
+LANGCHAIN_PROJECT=mongodb-anomaly-agent
+```
+
+Then run the stack (`honcho start` or `python -m agent_worker.main`) and trigger
+an anomaly. In LangSmith, open the `mongodb-anomaly-agent` project, filter runs
+by `anomaly_id`, and inspect the trace to see ReAct tool spans (`query_rag_knowledge_base`,
+`get_staff_contact`, `get_sensor_readings`, etc.).
 
 ---
 

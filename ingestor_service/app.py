@@ -20,11 +20,13 @@ from fastapi import FastAPI
 from .api import all_routers
 from .core.db import ensure_indexes
 from .messaging.queue import ensure_anomaly_stream
+from .observability import setup_fastapi_observability
 
 
 load_dotenv()
 
 app = FastAPI(title="Telemetry Ingestor", version="0.1.0")
+setup_fastapi_observability(app)
 
 for _router in all_routers:
     app.include_router(_router)

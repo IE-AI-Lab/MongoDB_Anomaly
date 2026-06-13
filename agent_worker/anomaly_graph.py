@@ -119,9 +119,24 @@ def _post_log(state: AgentState, **fields: Any) -> None:
         log.warning("failed to write agent_execution_logs run_id=%s: %s", run_id, exc)
 
 
-def _compact_knowledge(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _compact_knowledge(docs: list[Any]) -> list[dict[str, Any]]:
     compact: list[dict[str, Any]] = []
     for doc in docs[:5]:
+        # The LLM sometimes returns similar_cases as plain strings instead of
+        # the structured knowledge docs — keep those as free-text snippets.
+        if isinstance(doc, str):
+            compact.append(
+                {
+                    "document_id": None,
+                    "section_title": None,
+                    "equipment_type": None,
+                    "associated_error_codes": None,
+                    "text_content": doc[:800],
+                }
+            )
+            continue
+        if not isinstance(doc, dict):
+            continue
         compact.append(
             {
                 "document_id": doc.get("document_id") or doc.get("knowledge_id") or doc.get("id"),
@@ -222,6 +237,7 @@ def investigation_agent_node(state: AgentState) -> AgentState:
         state["anomaly"],
         state.get("sensor", {}),
         state.get("readings", []),
+        run_id=state.get("run_id"),
     )
     log.info(
         "investigation complete decision=%s confidence=%s rag_query=%s",

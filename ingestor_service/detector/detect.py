@@ -18,6 +18,7 @@ from uuid import uuid4
 from ..services.severity_engine import build_anomaly_severity_fields
 from ..messaging.queue import dispatch_anomaly
 from ..core.db import col
+from ..observability import record_anomaly_created
 from .state import get_counter
 from .thresholds import Threshold, get_threshold
 
@@ -166,6 +167,11 @@ def process_telemetry(telemetry_doc: dict[str, Any]) -> Optional[dict[str, Any]]
         }
 
         col("anomalies").insert_one(anomaly_doc)
+        record_anomaly_created(
+            error_code=anomaly_doc["error_code"],
+            metric_type=anomaly_doc.get("metric_type", ""),
+            severity_type=anomaly_doc.get("severity_type", ""),
+        )
 
         # High-signal session event (optional but useful).
         col("session_events").insert_one(
