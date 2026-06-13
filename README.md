@@ -154,6 +154,34 @@ pytest
 
 GitHub Actions runs this same test command on every push to `main` and every pull request.
 
+### Evaluation
+
+For demo-ready regression coverage, we ship a compact eval suite under
+`tests/evals/`:
+
+- **RAG retrieval evals** validate that representative anomaly queries
+  (temperature, vibration, pressure, flow, humidity) retrieve at least one
+  matching knowledge document.
+- **Agent output evals** run `run_investigation_agent()` with a mocked ReAct app
+  (no live API calls) and assert JSON schema quality: non-empty
+  `description`/`recommended_solution` and traceable `rag_query_used`.
+- **DeepEval judge metric (optional live mode)** runs only when
+  `DEEPEVAL_LIVE=1` and `OPENAI_API_KEY` are set.
+
+Run evals:
+
+```bash
+pytest tests/evals/
+```
+
+Optional live metric coverage:
+
+| Metric | Default in CI | Live mode |
+|--------|----------------|-----------|
+| Answer Relevancy | skipped | `DEEPEVAL_LIVE=1 OPENAI_API_KEY=...` |
+| Faithfulness | documented target | can be added with same live toggle |
+| Contextual Recall | documented target | can be added with same live toggle |
+
 ---
 
 ## Anomaly lifecycle
