@@ -11,6 +11,7 @@ import redis
 
 from . import config
 from .anomaly_graph import run_anomaly_graph
+from .observability import record_job_processed
 
 log = logging.getLogger(__name__)
 
@@ -117,11 +118,14 @@ def run_consumer() -> None:
 
         for _stream_name, messages in batches:
             for message_id, fields in messages:
+                started = time.perf_counter()
                 try:
                     process_anomaly_job(fields)
+                    record_job_processed("success", time.perf_counter() - started)
                     r.xack(stream, group, message_id)
                     log.info("acked message_id=%s anomaly_id=%s", message_id, fields.get("anomaly_id"))
                 except Exception:
+                    record_job_processed("failure", time.perf_counter() - started)
                     log.exception(
                         "job failed message_id=%s anomaly_id=%s — left pending for retry",
                         message_id,

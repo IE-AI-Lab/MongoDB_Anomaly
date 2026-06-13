@@ -184,6 +184,32 @@ Optional live metric coverage:
 
 ---
 
+## Monitoring
+
+Minimal demo stack: OpenTelemetry (in app + worker) + OTEL Collector +
+Prometheus + Grafana.
+
+Quickstart:
+
+1. Install observability packages:
+   `pip install -r requirements.txt -r requirements-observability.txt`
+2. Start monitoring services:
+   `docker compose -f monitoring/docker-compose.observability.yml up`
+3. Enable OTEL in `.env`:
+   `OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317`
+4. Run app + worker + simulator (`honcho start` or separate processes).
+5. Open Grafana at [http://localhost:3000](http://localhost:3000)
+   (default `admin` / `admin`) and open **Anomaly Pipeline Monitoring**.
+
+Dashboard panels:
+
+- **Ingest Rate (req/s):** request throughput on telemetry ingestion route.
+- **Anomalies Created:** detector anomaly creation rate.
+- **Agent Job Duration p95 (s):** p95 worker processing latency.
+- **Agent Failures:** failure rate for worker jobs left pending for retry.
+
+---
+
 ## Anomaly lifecycle
 
 An anomaly moves through these `status` values — the API enforces the transitions:
