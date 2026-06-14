@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from ..messaging import queue
 from ..core.db import col
+from ..detector import state as detector_state
 
 router = APIRouter(tags=["admin"])
 
@@ -39,6 +40,12 @@ _RUNTIME_COLLECTIONS: tuple[str, ...] = (
 class ResetRequest(BaseModel):
     # fb-* docs awaiting curation survive a reset unless explicitly purged.
     purge_feedback_knowledge: bool = False
+
+
+@router.post("/queues/reset")
+def reset_queues() -> dict[str, Any]:
+    """Wipe Redis anomaly streams only (high/medium/low + dlq). Mongo untouched."""
+    return queue.reset_anomaly_streams()
 
 
 @router.post("/simulation/reset")
@@ -62,10 +69,13 @@ def reset_simulation(req: ResetRequest) -> dict[str, Any]:
             .deleted_count
         )
 
+    detector_state.reset_all()
+
     return {
         "deleted": deleted,
         "staff_reset": staff_result.modified_count,
-        "redis_stream_trimmed": queue.trim_anomaly_stream(),
+        "detector_state_reset": True,
+        "redis_streams": queue.reset_anomaly_streams(),
         "note": (
             "simulator sequence_number is in-process client state — "
             "restart the simulator to reset it"

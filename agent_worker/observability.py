@@ -89,25 +89,31 @@ def _get_redis_client() -> Any:
 def _observe_stream_length(_options: Any):
     from opentelemetry.metrics import Observation
 
-    stream = config.anomaly_stream_key()
-    try:
-        length = _get_redis_client().xlen(stream)
-    except Exception:  # noqa: BLE001 — metrics must never break the worker
-        return []
-    return [Observation(length, {"stream": stream})]
+    client = _get_redis_client()
+    streams = [*config.anomaly_severity_streams().values(), config.anomaly_dlq_stream()]
+    observations = []
+    for stream in streams:
+        try:
+            observations.append(Observation(client.xlen(stream), {"stream": stream}))
+        except Exception:  # noqa: BLE001 — metrics must never break the worker
+            continue
+    return observations
 
 
 def _observe_stream_pending(_options: Any):
     from opentelemetry.metrics import Observation
 
-    stream = config.anomaly_stream_key()
+    client = _get_redis_client()
     group = config.anomaly_consumer_group()
-    try:
-        info = _get_redis_client().xpending(stream, group)
-        pending = info.get("pending", 0) if isinstance(info, dict) else 0
-    except Exception:  # noqa: BLE001 — group may not exist yet / redis down
-        return []
-    return [Observation(pending, {"stream": stream, "group": group})]
+    observations = []
+    for stream in config.anomaly_priority_streams():
+        try:
+            info = client.xpending(stream, group)
+            pending = info.get("pending", 0) if isinstance(info, dict) else 0
+            observations.append(Observation(pending, {"stream": stream, "group": group}))
+        except Exception:  # noqa: BLE001 — group may not exist yet / redis down
+            continue
+    return observations
 
 
 def _register_queue_gauges() -> None:

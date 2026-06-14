@@ -286,20 +286,20 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "max(anomaly_stream_pending)",
-          "legendFormat": "pending (unacked)",
+          "expr": "max by (stream) (anomaly_stream_length)",
+          "legendFormat": "len {{stream}}",
           "range": true,
           "refId": "A"
         },
         {
           "editorMode": "code",
-          "expr": "max(anomaly_stream_length)",
-          "legendFormat": "stream length",
+          "expr": "max by (stream) (anomaly_stream_pending)",
+          "legendFormat": "pending {{stream}}",
           "range": true,
           "refId": "B"
         }
       ],
-      "title": "Redis Queue (anomaly:jobs)",
+      "title": "Redis Queues by Severity (high/medium/low + dlq)",
       "type": "timeseries"
     }
   ],
