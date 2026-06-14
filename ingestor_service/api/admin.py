@@ -43,6 +43,12 @@ class ResetRequest(BaseModel):
     purge_feedback_knowledge: bool = False
 
 
+@router.post("/queues/reset")
+def reset_queues() -> dict[str, Any]:
+    """Wipe Redis anomaly streams only (high/medium/low + dlq). Mongo untouched."""
+    return queue.reset_anomaly_streams()
+
+
 @router.post("/simulation/reset")
 def reset_simulation(req: ResetRequest) -> dict[str, Any]:
     """Purge runtime state for a fresh demo run. Seed data is untouched."""
@@ -71,8 +77,9 @@ def reset_simulation(req: ResetRequest) -> dict[str, Any]:
     return {
         "deleted": deleted,
         "staff_reset": staff_result.modified_count,
-        "redis_stream_trimmed": queue.trim_anomaly_stream(),
         "debounce_state_cleared": True,
+        # Per-severity streams + DLQ are wiped and the consumer groups recreated.
+        "redis_streams": queue.reset_anomaly_streams(),
         "note": (
             "simulator sequence_number is in-process client state — "
             "restart the simulator to reset it"

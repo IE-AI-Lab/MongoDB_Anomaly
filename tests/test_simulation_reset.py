@@ -42,7 +42,11 @@ def fake_db(monkeypatch):
     # holds its own `col` reference — patch it to the same fake DB.
     monkeypatch.setattr(sim_control, "col", db)
     # Keep the unit test off Redis regardless of local .env.
-    monkeypatch.setattr(routes_admin.queue, "trim_anomaly_stream", lambda: False)
+    monkeypatch.setattr(
+        routes_admin.queue,
+        "reset_anomaly_streams",
+        lambda: {"skipped": True, "reason": "test"},
+    )
     return db
 
 
@@ -81,7 +85,7 @@ def test_reset_is_idempotent(fake_db):
     routes_admin.reset_simulation(routes_admin.ResetRequest())
     result = routes_admin.reset_simulation(routes_admin.ResetRequest())
     assert all(v == 0 for v in result["deleted"].values())
-    assert result["redis_stream_trimmed"] is False
+    assert result["redis_streams"]["skipped"] is True
 
 
 def test_reset_clears_debounce_state(fake_db):
@@ -102,3 +106,22 @@ def test_simulation_stop_then_start_round_trip(fake_db):
     assert routes_admin.simulation_status() == {"running": False}
     assert routes_admin.simulation_start() == {"running": True}
     assert routes_admin.simulation_status() == {"running": True}
+
+
+def test_reset_queues_endpoint(monkeypatch):
+    monkeypatch.setattr(
+        routes_admin.queue,
+        "reset_anomaly_streams",
+        lambda: {
+            "streams_deleted": {
+                "anomaly:high": True,
+                "anomaly:medium": True,
+                "anomaly:low": True,
+                "anomaly:dlq": True,
+            },
+            "consumer_groups_recreated": True,
+        },
+    )
+    result = routes_admin.reset_queues()
+    assert result["consumer_groups_recreated"] is True
+    assert result["streams_deleted"]["anomaly:high"] is True

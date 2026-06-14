@@ -68,6 +68,13 @@ class _FakeDB:
         return self.cols.setdefault(name, _FakeCollection())
 
 
+@pytest.fixture(autouse=True)
+def _isolate_detector_env(monkeypatch):
+    """Keep detector tests independent of developer .env (ROC/STAT often enabled locally)."""
+    monkeypatch.setenv("ANOMALY_ROC_ENABLED", "false")
+    monkeypatch.setenv("ANOMALY_STAT_ENABLED", "false")
+
+
 @pytest.fixture
 def fake_col(monkeypatch):
     state.reset_all()
@@ -122,4 +129,76 @@ def test_normal_reading_resets_counter(monkeypatch, fake_col):
 def test_no_threshold_means_no_anomaly(monkeypatch, fake_col):
     monkeypatch.setattr(detect, "get_threshold", lambda sensor_id, metric_name: None)
     assert detect.process_telemetry(_telemetry(99.0)) is None
+    assert fake_col("anomalies").docs == []
+
+
+# --- rate-of-change detector ----------------------------------------------
+
+def _enable_roc(monkeypatch):
+    monkeypatch.setattr(detect, "get_threshold", lambda s, m: None)
+    monkeypatch.setenv("ANOMALY_ROC_ENABLED", "true")
+    monkeypatch.setenv("ANOMALY_STAT_ENABLED", "false")
+    monkeypatch.setenv("ANOMALY_ROC_PCT", "0.3")
+
+
+def test_rate_of_change_triggers(monkeypatch, fake_col):
+    _enable_roc(monkeypatch)
+
+    assert detect.process_telemetry(_telemetry(10.0)) is None  # warms the window
+    anomaly = detect.process_telemetry(_telemetry(20.0))  # +100% vs previous
+
+    assert anomaly is not None
+    assert anomaly["detection_method"] == "rate_of_change"
+    assert anomaly["error_code"] == "VIBRATION_RAPID_RISE"
+    assert anomaly["trigger_value"]["pct_change"] == 1.0
+    assert anomaly["trigger_value"]["previous"] == 10.0
+
+
+def test_rate_of_change_drop_error_code(monkeypatch, fake_col):
+    _enable_roc(monkeypatch)
+    assert detect.process_telemetry(_telemetry(10.0)) is None
+    anomaly = detect.process_telemetry(_telemetry(2.0))  # -80% vs previous
+    assert anomaly is not None
+    assert anomaly["error_code"] == "VIBRATION_RAPID_DROP"
+
+
+def test_rate_of_change_rearms_after_normal(monkeypatch, fake_col):
+    _enable_roc(monkeypatch)
+
+    assert detect.process_telemetry(_telemetry(10.0)) is None
+    assert detect.process_telemetry(_telemetry(20.0)) is not None  # fires
+    # A second large jump is suppressed until the signal settles.
+    assert detect.process_telemetry(_telemetry(40.0)) is None
+    # Small change re-arms the detector.
+    assert detect.process_telemetry(_telemetry(40.4)) is None
+    # Next large jump fires again.
+    assert detect.process_telemetry(_telemetry(80.0)) is not None
+
+
+# --- statistical (z-score) detector ---------------------------------------
+
+def test_statistical_outlier_triggers(monkeypatch, fake_col):
+    monkeypatch.setattr(detect, "get_threshold", lambda s, m: None)
+    monkeypatch.setenv("ANOMALY_ROC_ENABLED", "false")
+    monkeypatch.setenv("ANOMALY_STAT_ENABLED", "true")
+    monkeypatch.setenv("ANOMALY_STAT_MIN_READINGS", "5")
+    monkeypatch.setenv("ANOMALY_STAT_ZSCORE", "3.0")
+
+    for v in [10.0, 10.1, 9.9, 10.0, 10.05]:  # warm baseline (low spread)
+        assert detect.process_telemetry(_telemetry(v)) is None
+
+    anomaly = detect.process_telemetry(_telemetry(20.0))  # far outside baseline
+    assert anomaly is not None
+    assert anomaly["detection_method"] == "statistical"
+    assert anomaly["error_code"] == "VIBRATION_OUTLIER"
+    assert anomaly["trigger_value"]["z_score"] > 3.0
+    assert anomaly["trigger_value"]["baseline_size"] == 5
+
+
+def test_statistical_disabled_by_default(monkeypatch, fake_col):
+    # Without the env flag the detector stays off (no anomaly on a clear outlier).
+    monkeypatch.setattr(detect, "get_threshold", lambda s, m: None)
+    for v in [10.0, 10.1, 9.9, 10.0, 10.05, 10.0, 9.95, 10.02]:
+        assert detect.process_telemetry(_telemetry(v)) is None
+    assert detect.process_telemetry(_telemetry(20.0)) is None
     assert fake_col("anomalies").docs == []

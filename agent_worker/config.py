@@ -17,6 +17,46 @@ def anomaly_consumer_group() -> str:
     return os.getenv("ANOMALY_CONSUMER_GROUP", "agent-workers")
 
 
+# --- Hybrid severity-based Redis routing -------------------------------------
+# Mirrors ingestor_service.core.config (separate process). The worker drains
+# {prefix}:high before :medium before :low, and routes exhausted jobs to
+# {prefix}:dlq.
+
+
+def anomaly_stream_prefix() -> str:
+    return os.getenv("ANOMALY_STREAM_PREFIX", "anomaly")
+
+
+def anomaly_priority_order() -> list[str]:
+    """Severity buckets in descending priority."""
+    return ["high", "medium", "low"]
+
+
+def anomaly_severity_streams() -> dict[str, str]:
+    """Map each severity bucket to its Redis stream key (high → low)."""
+    prefix = anomaly_stream_prefix()
+    return {sev: f"{prefix}:{sev}" for sev in anomaly_priority_order()}
+
+
+def anomaly_priority_streams() -> list[str]:
+    """Stream keys in the order the worker should drain them."""
+    streams = anomaly_severity_streams()
+    return [streams[sev] for sev in anomaly_priority_order()]
+
+
+def anomaly_dlq_stream() -> str:
+    return f"{anomaly_stream_prefix()}:dlq"
+
+
+def anomaly_max_retries() -> int:
+    """How many times a job may be retried before being sent to the DLQ."""
+    return int(os.getenv("ANOMALY_MAX_RETRIES", "3"))
+
+
+def anomaly_stream_maxlen() -> int:
+    return int(os.getenv("ANOMALY_STREAM_MAXLEN", "10000"))
+
+
 def consumer_name() -> str:
     return os.getenv("AGENT_CONSUMER_NAME", "worker-1")
 
