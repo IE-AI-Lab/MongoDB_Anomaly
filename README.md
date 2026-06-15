@@ -212,6 +212,33 @@ Dashboard panels:
 
 ---
 
+## Frontend (operator dashboard)
+
+A MongoDB Atlas–styled Next.js console lives in [`frontend/`](frontend/) — an
+external HTTP-API consumer (imports nothing from the Python services). Dashboard
+(live machine charts + workers + alerts + Start/Stop/Reset + new-alert toasts),
+agent report + worker assignment, worker-feedback (closes the RAG loop), and a
+knowledge CRUD + review-queue page.
+
+```bash
+cd frontend
+cp .env.local.example .env.local   # optional; defaults to http://127.0.0.1:8000
+npm install
+npm run dev                         # http://localhost:3000
+```
+
+Browser → API calls are proxied through Next at `/backend/*` (set
+`DATA_LAYER_BASE_URL`), so no CORS config is needed. The data layer must be up
+(`uvicorn ... --port 8000` or `honcho start`) and seeded (`python -m scripts.init_db`).
+
+> **Port note:** Next dev and the optional Grafana stack both default to **3000**.
+> If you run monitoring too, start the frontend on another port:
+> `npm run dev -- -p 3001`.
+
+See [`frontend/README.md`](frontend/README.md) for the page/route map.
+
+---
+
 ## Anomaly lifecycle
 
 An anomaly moves through these `status` values — the API enforces the transitions:
@@ -248,8 +275,10 @@ Base URL: `http://localhost:8000`. All responses are JSON with Mongo `_id` strip
 |--------|------|--------------|---------|
 | `GET` | `/anomalies/{anomaly_id}` | — | one anomaly |
 | `GET` | `/anomalies` | `status`, `sensor_id`, `limit` (1–500) | list, newest first |
+| `GET` | `/sensors` | `is_active` (default true), `metric_type` | list of machines/sensors |
 | `GET` | `/sensors/{sensor_id}` | — | one sensor |
 | `GET` | `/sensors/{sensor_id}/readings` | `minutes` (1–1440), `limit` (1–2000) | recent telemetry |
+| `GET` | `/system_metadata` | `config_type`, `target_metric` | threshold + severity-band config (chart limit lines) |
 | `GET` | `/knowledge/search` | `q` (required), `equipment_type`, `error_codes` (CSV), `k` (1–20) | ranked knowledge docs |
 | `GET` | `/staff_on_call` | `is_on_call`, `specialization`, `handled_severity_type`, `facility_id` | staff, by escalation rank |
 
@@ -279,7 +308,10 @@ approves it — a guardrail against poisoning RAG with bad field notes.
 
 | Method | Path | Body | Effect |
 |--------|------|------|--------|
-| `POST` | `/simulation/reset` | `{purge_feedback_knowledge?: false}` | purges anomalies, telemetry, agent logs, session events; restores all staff to on-call; trims the Redis job stream; seed data untouched. Restart the simulator to reset its sequence counters. |
+| `POST` | `/simulation/reset` | `{purge_feedback_knowledge?: false}` | purges anomalies, telemetry, agent logs, session events; restores all staff to on-call; trims the Redis job stream; clears in-memory detector debounce state; seed data untouched. Restart the simulator to reset its sequence counters. |
+| `GET`  | `/simulation/status` | — | `{running}` — simulator polls this each tick (fail-open to running) |
+| `POST` | `/simulation/start` | — | resume telemetry emission (`{running:true}`) |
+| `POST` | `/simulation/stop` | — | pause telemetry emission (`{running:false}`); the simulator process stays alive |
 
 #### Example agent flow
 

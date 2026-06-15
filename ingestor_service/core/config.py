@@ -125,5 +125,7 @@ def otel_exporter_otlp_endpoint() -> str:
 
 
 def otel_service_name(default: str = "ingestor_service") -> str:
-    return os.getenv("OTEL_SERVICE_NAME", default)
+    # Empty (OTEL_SERVICE_NAME=) means "unset" — fall back to the per-process
+    # default rather than reporting an empty service.name to the collector.
+    return os.getenv("OTEL_SERVICE_NAME") or default
 

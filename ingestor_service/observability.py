@@ -35,19 +35,23 @@ def _configure_otel() -> bool:
         log.warning("OTEL_ENABLED=true but OpenTelemetry packages are not installed")
         return False
 
-    endpoint = config.otel_exporter_otlp_endpoint()
-    resource = Resource.create({"service.name": config.otel_service_name("ingestor_service")})
+    try:
+        endpoint = config.otel_exporter_otlp_endpoint()
+        resource = Resource.create({"service.name": config.otel_service_name("ingestor_service")})
 
-    tracer_provider = TracerProvider(resource=resource)
-    tracer_provider.add_span_processor(
-        BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, insecure=True))
-    )
-    trace.set_tracer_provider(tracer_provider)
+        tracer_provider = TracerProvider(resource=resource)
+        tracer_provider.add_span_processor(
+            BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, insecure=True))
+        )
+        trace.set_tracer_provider(tracer_provider)
 
-    metric_reader = PeriodicExportingMetricReader(
-        OTLPMetricExporter(endpoint=endpoint, insecure=True)
-    )
-    metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[metric_reader]))
+        metric_reader = PeriodicExportingMetricReader(
+            OTLPMetricExporter(endpoint=endpoint, insecure=True)
+        )
+        metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[metric_reader]))
+    except Exception:  # noqa: BLE001 — observability is optional and must never crash startup
+        log.exception("failed to configure OpenTelemetry — continuing without it")
+        return False
 
     _otel_ready = True
     log.info("OpenTelemetry enabled endpoint=%s service=%s", endpoint, config.otel_service_name("ingestor_service"))
@@ -71,21 +75,24 @@ def record_anomaly_created(error_code: str, metric_type: str, severity_type: str
     if not _configure_otel():
         return
 
-    if _anomaly_counter is None:
-        from opentelemetry import metrics
+    try:
+        if _anomaly_counter is None:
+            from opentelemetry import metrics
 
-        meter = metrics.get_meter("ingestor_service.detector")
-        _anomaly_counter = meter.create_counter(
-            "anomalies_created_total",
-            description="Total anomalies created by detector",
-            unit="1",
+            meter = metrics.get_meter("ingestor_service.detector")
+            _anomaly_counter = meter.create_counter(
+                "anomalies_created_total",
+                description="Total anomalies created by detector",
+                unit="1",
+            )
+
+        _anomaly_counter.add(
+            1,
+            attributes={
+                "error_code": error_code or "unknown",
+                "metric_type": metric_type or "unknown",
+                "severity_type": severity_type or "unknown",
+            },
         )
-
-    _anomaly_counter.add(
-        1,
-        attributes={
-            "error_code": error_code or "unknown",
-            "metric_type": metric_type or "unknown",
-            "severity_type": severity_type or "unknown",
-        },
-    )
+    except Exception:  # noqa: BLE001 — metrics must never break detection/dispatch
+        log.warning("failed to record anomalies_created_total metric", exc_info=True)

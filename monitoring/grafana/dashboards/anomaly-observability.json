@@ -57,7 +57,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(http_server_duration_milliseconds_count{http_target=\"/ingest/telemetry\"}[1m]))",
+          "expr": "sum(rate(http_server_duration_milliseconds_count{http_route=\"/ingest/telemetry\"}[1m]))",
           "legendFormat": "ingest req/s",
           "range": true,
           "refId": "A"
@@ -241,8 +241,8 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (http_method, http_target) (rate(http_server_duration_milliseconds_count[1m]))",
-          "legendFormat": "{{http_method}} {{http_target}}",
+          "expr": "sum by (http_method, http_route) (rate(http_server_duration_milliseconds_count[1m]))",
+          "legendFormat": "{{http_method}} {{http_route}}",
           "range": true,
           "refId": "A"
         }

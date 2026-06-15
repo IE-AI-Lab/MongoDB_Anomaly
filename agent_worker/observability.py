@@ -25,6 +25,10 @@ def init_langsmith() -> None:
     and LANGCHAIN_API_KEY is set. We keep this helper tiny and non-fatal.
     """
     if not os.getenv("LANGCHAIN_API_KEY"):
+        # LangChain reads LANGCHAIN_TRACING_V2 directly, so a leftover `true`
+        # (e.g. from a copied .env) would make every run attempt trace export and
+        # log errors. Force it off when there's no key.
+        os.environ["LANGCHAIN_TRACING_V2"] = "false"
         log.info("LangSmith tracing disabled (LANGCHAIN_API_KEY not set)")
         return
 
@@ -53,19 +57,23 @@ def _configure_otel() -> bool:
         log.warning("OTEL_ENABLED=true but OpenTelemetry packages are not installed")
         return False
 
-    endpoint = config.otel_exporter_otlp_endpoint()
-    resource = Resource.create({"service.name": config.otel_service_name("agent_worker")})
+    try:
+        endpoint = config.otel_exporter_otlp_endpoint()
+        resource = Resource.create({"service.name": config.otel_service_name("agent_worker")})
 
-    tracer_provider = TracerProvider(resource=resource)
-    tracer_provider.add_span_processor(
-        BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, insecure=True))
-    )
-    trace.set_tracer_provider(tracer_provider)
+        tracer_provider = TracerProvider(resource=resource)
+        tracer_provider.add_span_processor(
+            BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, insecure=True))
+        )
+        trace.set_tracer_provider(tracer_provider)
 
-    metric_reader = PeriodicExportingMetricReader(
-        OTLPMetricExporter(endpoint=endpoint, insecure=True)
-    )
-    metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[metric_reader]))
+        metric_reader = PeriodicExportingMetricReader(
+            OTLPMetricExporter(endpoint=endpoint, insecure=True)
+        )
+        metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[metric_reader]))
+    except Exception:  # noqa: BLE001 — observability is optional and must never crash startup
+        log.exception("failed to configure OpenTelemetry — continuing without it")
+        return False
 
     _otel_ready = True
     log.info("OpenTelemetry enabled endpoint=%s service=%s", endpoint, config.otel_service_name("agent_worker"))
@@ -143,21 +151,36 @@ def record_job_processed(result: str, duration_seconds: float) -> None:
     if not _configure_otel():
         return
 
-    if _jobs_counter is None or _job_duration_hist is None:
-        from opentelemetry import metrics
+    try:
+        if _jobs_counter is None or _job_duration_hist is None:
+            from opentelemetry import metrics
 
-        meter = metrics.get_meter("agent_worker.consumer")
-        _jobs_counter = meter.create_counter(
-            "agent_jobs_processed_total",
-            description="Number of anomaly jobs processed by the agent worker",
-            unit="1",
-        )
-        _job_duration_hist = meter.create_histogram(
-            "agent_job_duration_seconds",
-            description="Duration of a single anomaly job",
-            unit="s",
-        )
+            meter = metrics.get_meter("agent_worker.consumer")
+            _jobs_counter = meter.create_counter(
+                "agent_jobs_processed_total",
+                description="Number of anomaly jobs processed by the agent worker",
+                unit="1",
+            )
+            # Jobs run an LLM-backed ReAct loop and routinely take seconds, so the
+            # default (millisecond-scale) buckets would lump everything together.
+            buckets = [0.1, 0.25, 0.5, 1, 2.5, 5, 7.5, 10, 15, 30, 60]
+            try:
+                _job_duration_hist = meter.create_histogram(
+                    "agent_job_duration_seconds",
+                    description="Duration of a single anomaly job",
+                    unit="s",
+                    explicit_bucket_boundaries_advisory=buckets,
+                )
+            except TypeError:
+                # opentelemetry-api < 1.22 has no advisory parameter.
+                _job_duration_hist = meter.create_histogram(
+                    "agent_job_duration_seconds",
+                    description="Duration of a single anomaly job",
+                    unit="s",
+                )
 
-    safe_result = result if result in {"success", "failure"} else "unknown"
-    _jobs_counter.add(1, attributes={"result": safe_result})
-    _job_duration_hist.record(duration_seconds, attributes={"result": safe_result})
+        safe_result = result if result in {"success", "failure"} else "unknown"
+        _jobs_counter.add(1, attributes={"result": safe_result})
+        _job_duration_hist.record(duration_seconds, attributes={"result": safe_result})
+    except Exception:  # noqa: BLE001 — metrics must never break the worker loop
+        log.warning("failed to record agent job metrics", exc_info=True)
