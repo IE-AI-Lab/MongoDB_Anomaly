@@ -24,9 +24,9 @@ def parse_args() -> argparse.Namespace:
         default=0.7,
         help="Per-sensor probability of emitting on a given tick (0..1)",
     )
-    p.add_argument("--prob-low", type=float, default=0.08, help="Probability of low fault per emitted reading")
-    p.add_argument("--prob-med", type=float, default=0.04, help="Probability of medium fault per emitted reading")
-    p.add_argument("--prob-high", type=float, default=0.02, help="Probability of high fault per emitted reading")
+    p.add_argument("--prob-low", type=float, default=0.004, help="Probability of low fault per emitted reading")
+    p.add_argument("--prob-med", type=float, default=0.002, help="Probability of medium fault per emitted reading")
+    p.add_argument("--prob-high", type=float, default=0.001, help="Probability of high fault per emitted reading")
     p.add_argument(
         "--deterministic-demo",
         action="store_true",
@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--demo-interval-ticks",
         type=int,
-        default=10,
+        default=60,
         help="Tick interval for deterministic guaranteed anomaly injection",
     )
     return p.parse_args()

@@ -40,3 +40,20 @@ def post_telemetry(base_url: str, payload: dict[str, Any], timeout_seconds: floa
         time.sleep(backoff)
         backoff *= 2
 
+
+def get_simulation_status(base_url: str, timeout_seconds: float = 3.0) -> bool:
+    """
+    Return whether the simulator should currently emit (run/pause flag).
+
+    Fail-open: any error (endpoint missing, network blip, old ingestor) returns
+    True so a control-plane hiccup never freezes the simulator.
+    """
+    url = f"{base_url.rstrip('/')}/simulation/status"
+    try:
+        resp = requests.get(url, timeout=timeout_seconds)
+        if 200 <= resp.status_code < 300:
+            return bool(resp.json().get("running", True))
+    except (requests.RequestException, ValueError):
+        pass
+    return True
+
