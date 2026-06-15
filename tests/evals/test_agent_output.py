@@ -19,7 +19,7 @@ class _FakeAgentApp:
 
     def invoke(self, _inputs: dict[str, Any], config: dict[str, Any] | None = None) -> dict[str, Any]:
         assert config is not None
-        assert config.get("recursion_limit") == 8
+        assert config.get("recursion_limit") == 20
         return {
             "messages": [
                 _FakeMessage(
