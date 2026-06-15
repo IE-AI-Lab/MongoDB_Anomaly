@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
-# Start ingestor + agent worker + simulator in one terminal (via Honcho).
+# Run the WHOLE stack in one terminal via Honcho: redis + api + agent + sim + web.
+# Ctrl+C stops everything.
 #
 # Usage:
-#   ./scripts/dev_up.sh          # all processes in Procfile
+#   ./scripts/dev_up.sh             # everything in the Procfile
 #   ./scripts/dev_up.sh api agent   # subset
-#
-# Prerequisites:
-#   pip install -r requirements.txt -r requirements-dev.txt
-#   .env configured (copy from .env.example)
-#   redis-server installed (started by Procfile if not already running)
 
 set -euo pipefail
 
@@ -20,10 +16,17 @@ if [[ ! -f .env ]]; then
   exit 1
 fi
 
-if ! command -v honcho >/dev/null 2>&1; then
-  echo "error: honcho not installed — run: pip install -r requirements-dev.txt" >&2
-  exit 1
+# Use the project venv if present so child procs resolve to it.
+if [[ -f .venv/bin/activate ]]; then
+  # shellcheck disable=SC1091
+  source .venv/bin/activate
+elif [[ -f .venv/Scripts/activate ]]; then
+  # shellcheck disable=SC1091
+  source .venv/Scripts/activate
 fi
 
-echo "starting stack from $ROOT (redis + api + agent + sim — Ctrl+C stops all)"
+# Ensure honcho is available (dev dependency).
+python -m pip show honcho >/dev/null 2>&1 || pip install honcho
+
+echo "starting stack from $ROOT (redis + api + agent + sim + web — Ctrl+C stops all)"
 exec honcho start "$@"

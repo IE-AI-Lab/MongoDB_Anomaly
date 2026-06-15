@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Start Redis for local dev, or no-op if already listening (honcho keeps this process alive).
+# Start Redis for local dev, or supervise an already-running instance (honcho
+# keeps this process alive). Portable: no redis-cli dependency, so it works in
+# Git Bash on Windows where only a Docker/native Redis may be listening.
 
 set -euo pipefail
 
@@ -17,15 +19,23 @@ if [[ "$REDIS_URL" =~ :([0-9]+) ]]; then
   PORT="${BASH_REMATCH[1]}"
 fi
 
-if command -v redis-cli >/dev/null 2>&1 && redis-cli -p "$PORT" ping >/dev/null 2>&1; then
+# Already listening? Supervise without starting a second instance. Uses bash's
+# /dev/tcp (available in Git Bash) instead of redis-cli.
+if (echo > "/dev/tcp/127.0.0.1/$PORT") >/dev/null 2>&1; then
   echo "redis: already listening on :$PORT — supervising (no second instance)"
   exec sleep infinity
 fi
 
-if ! command -v redis-server >/dev/null 2>&1; then
-  echo "error: redis-server not found — install Redis or start it manually" >&2
-  exit 1
+if command -v redis-server >/dev/null 2>&1; then
+  echo "redis: starting redis-server on :$PORT"
+  exec redis-server --port "$PORT"
 fi
 
-echo "redis: starting redis-server on :$PORT"
-exec redis-server --port "$PORT"
+if command -v docker >/dev/null 2>&1; then
+  echo "redis: starting Redis via Docker on :$PORT"
+  exec docker run --rm --name cnc-redis -p "$PORT:6379" redis
+fi
+
+echo "error: Redis not reachable on :$PORT and no redis-server/docker found." >&2
+echo "       Start Redis first, e.g.: docker run -d -p 6379:6379 redis" >&2
+exit 1
