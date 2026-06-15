@@ -35,6 +35,7 @@ def fake_db(monkeypatch):
             {"document_id": "fb-1234", "is_active": False},
         ],
     )
+    db.add_collection("system_metadata", [])
     monkeypatch.setattr(routes_admin, "col", db)
     # Keep the unit test off Redis regardless of local .env.
     monkeypatch.setattr(routes_admin.queue, "trim_anomaly_stream", lambda: False)
@@ -77,3 +78,23 @@ def test_reset_is_idempotent(fake_db):
     result = routes_admin.reset_simulation(routes_admin.ResetRequest())
     assert all(v == 0 for v in result["deleted"].values())
     assert result["redis_stream_trimmed"] is False
+
+
+def test_reset_clears_debounce_state(fake_db):
+    # Seed an in-memory debounce counter, then ensure reset wipes it.
+    routes_admin.state.get_counter("SENS-1", "temp_celsius").consecutive_violations = 5
+    result = routes_admin.reset_simulation(routes_admin.ResetRequest())
+    assert result["debounce_state_cleared"] is True
+    assert routes_admin.state._STATE == {}
+
+
+def test_simulation_status_defaults_to_running(fake_db):
+    # No simulation_control doc seeded -> fail-open to running.
+    assert routes_admin.simulation_status() == {"running": True}
+
+
+def test_simulation_stop_then_start_round_trip(fake_db):
+    assert routes_admin.simulation_stop() == {"running": False}
+    assert routes_admin.simulation_status() == {"running": False}
+    assert routes_admin.simulation_start() == {"running": True}
+    assert routes_admin.simulation_status() == {"running": True}

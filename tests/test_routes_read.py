@@ -37,7 +37,45 @@ def fake_db(monkeypatch):
                 "sensor_id": "SENS-1",
                 "equipment_type": "centrifugal_pump",
                 "metric_type": "vibration",
-            }
+                "is_active": True,
+            },
+            {
+                "_id": "s2",
+                "sensor_id": "SENS-2",
+                "equipment_type": "packaging_room",
+                "metric_type": "environment",
+                "is_active": True,
+            },
+            {
+                "_id": "s3",
+                "sensor_id": "SENS-3",
+                "equipment_type": "old_unit",
+                "metric_type": "pressure",
+                "is_active": False,
+            },
+        ],
+    )
+    db.add_collection(
+        "system_metadata",
+        [
+            {
+                "_id": "cfg1",
+                "config_type": "anomaly_thresholds",
+                "target_metric": "temp_celsius",
+                "rules": {"max_allowed_temp_celsius": 80.0},
+            },
+            {
+                "_id": "cfg2",
+                "config_type": "severity_bands",
+                "target_metric": "*",
+                "rules": {"low_max_ratio": 0.10},
+            },
+            {
+                "_id": "cfg3",
+                "config_type": "simulation_control",
+                "target_metric": "*",
+                "running": True,
+            },
         ],
     )
     db.add_collection(
@@ -124,6 +162,31 @@ def test_knowledge_search_parses_error_codes_csv(monkeypatch, fake_db):
     assert called["equipment_type"] == "centrifugal_pump"
     assert called["error_codes"] == ["VIBRATION_HIGH", "BEARING_WEAR"]
     assert called["k"] == 3
+
+
+def test_list_sensors_defaults_to_active_only(fake_db):
+    out = routes_read.list_sensors(is_active=True, metric_type=None)
+    ids = [s["sensor_id"] for s in out]
+    assert ids == ["SENS-1", "SENS-2"]  # sorted, SENS-3 inactive excluded
+    assert all("_id" not in s for s in out)
+
+
+def test_list_sensors_filters_by_metric_type(fake_db):
+    out = routes_read.list_sensors(is_active=True, metric_type="environment")
+    assert len(out) == 1
+    assert out[0]["sensor_id"] == "SENS-2"
+
+
+def test_list_system_metadata_filters_by_config_type(fake_db):
+    out = routes_read.list_system_metadata(config_type="anomaly_thresholds", target_metric=None)
+    assert len(out) == 1
+    assert out[0]["target_metric"] == "temp_celsius"
+    assert "_id" not in out[0]
+
+
+def test_list_system_metadata_no_filter_returns_all(fake_db):
+    out = routes_read.list_system_metadata(config_type=None, target_metric=None)
+    assert len(out) == 3
 
 
 def test_list_on_call_applies_filters(fake_db):

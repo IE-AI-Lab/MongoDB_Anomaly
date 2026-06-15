@@ -76,6 +76,7 @@ class FakeCursor:
 class _UpdateResult:
     matched_count: int
     modified_count: int = 0
+    upserted_id: Any = None
 
 
 @dataclass
@@ -97,12 +98,21 @@ class FakeCollection:
         rows = [_apply_projection(d, projection) for d in self.docs if _matches(d, query)]
         return FakeCursor(rows)
 
-    def update_one(self, query: dict[str, Any], update: dict[str, Any]) -> _UpdateResult:
+    def update_one(
+        self, query: dict[str, Any], update: dict[str, Any], upsert: bool = False
+    ) -> _UpdateResult:
         for doc in self.docs:
             if _matches(doc, query):
                 if "$set" in update:
                     doc.update(update["$set"])
                 return _UpdateResult(matched_count=1, modified_count=1)
+        if upsert:
+            # Seed a new doc from the query's scalar equalities + the $set fields,
+            # mirroring Mongo upsert semantics for the simple cases we use.
+            new_doc = {k: v for k, v in query.items() if not isinstance(v, dict)}
+            new_doc.update(update.get("$set", {}))
+            self.docs.append(deepcopy(new_doc))
+            return _UpdateResult(matched_count=0, modified_count=0, upserted_id="fake-upsert")
         return _UpdateResult(matched_count=0)
 
     def update_many(self, query: dict[str, Any], update: dict[str, Any]) -> _UpdateResult:
