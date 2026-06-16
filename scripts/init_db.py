@@ -22,6 +22,7 @@ from pymongo.database import Database
 from pymongo.errors import CollectionInvalid, OperationFailure, PyMongoError
 
 from ingestor_service.core import config as svc_config
+from ingestor_service.services import simulation_control
 from .knowledge_seed import KNOWLEDGE_SEED
 
 
@@ -443,14 +444,13 @@ def seed_system_metadata(db: Database[dict[str, Any]]) -> None:
 
     # Simulator run/pause flag. Seeded as running so `honcho start` emits
     # telemetry out of the box; the UI Start/Stop buttons flip it via the API.
+    # The doc shape comes from services/simulation_control so it lives in one place.
     seed_document_if_missing(
         collection,
-        {"config_type": "simulation_control"},
+        simulation_control.FILTER,
         {
             **base,
-            "config_type": "simulation_control",
-            "target_metric": "*",
-            "running": True,
+            **simulation_control.control_document(True, updated_by="scripts/init_db.py"),
             "description": "Simulator emission flag — polled by simulator each tick.",
         },
         "system_metadata.simulation_control",

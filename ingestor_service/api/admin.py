@@ -22,35 +22,9 @@ from pydantic import BaseModel
 from ..messaging import queue
 from ..core.db import col
 from ..detector import state
+from ..services import simulation_control
 
 router = APIRouter(tags=["admin"])
-
-# system_metadata doc holding the simulator run/pause flag. The simulator polls
-# GET /simulation/status each tick; start/stop flip this flag. Default running
-# (the doc may not exist yet) so honcho start emits telemetry out of the box.
-_SIM_CONTROL_FILTER: dict[str, Any] = {"config_type": "simulation_control"}
-
-
-def _sim_running() -> bool:
-    doc = col("system_metadata").find_one(_SIM_CONTROL_FILTER)
-    if not doc:
-        return True
-    return bool(doc.get("running", True))
-
-
-def _set_sim_running(running: bool) -> bool:
-    col("system_metadata").update_one(
-        _SIM_CONTROL_FILTER,
-        {"$set": {
-            "config_type": "simulation_control",
-            "target_metric": "*",
-            "running": running,
-            "last_updated_by": "api/admin.py",
-            "last_updated_at_utc": datetime.now(timezone.utc),
-        }},
-        upsert=True,
-    )
-    return running
 
 # Collections holding runtime state — wiped entirely on reset. Seed-backed
 # collections (sensors, staff_on_call, knowledge_base, system_metadata) are not
@@ -114,16 +88,16 @@ def reset_simulation(req: ResetRequest) -> dict[str, Any]:
 @router.get("/simulation/status")
 def simulation_status() -> dict[str, bool]:
     """Current run state. The simulator polls this each tick (fail-open to running)."""
-    return {"running": _sim_running()}
+    return {"running": simulation_control.is_running()}
 
 
 @router.post("/simulation/start")
 def simulation_start() -> dict[str, bool]:
     """Resume telemetry emission."""
-    return {"running": _set_sim_running(True)}
+    return {"running": simulation_control.set_running(True)}
 
 
 @router.post("/simulation/stop")
 def simulation_stop() -> dict[str, bool]:
     """Pause telemetry emission (the simulator process stays alive)."""
-    return {"running": _set_sim_running(False)}
+    return {"running": simulation_control.set_running(False)}
