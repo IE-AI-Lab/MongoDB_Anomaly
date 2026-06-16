@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from ingestor_service.api import admin as routes_admin
+from ingestor_service.services import simulation_control as sim_control
 
 from tests.fakes import FakeDB
 
@@ -37,6 +38,9 @@ def fake_db(monkeypatch):
     )
     db.add_collection("system_metadata", [])
     monkeypatch.setattr(routes_admin, "col", db)
+    # The sim run/pause endpoints delegate to services.simulation_control, which
+    # holds its own `col` reference — patch it to the same fake DB.
+    monkeypatch.setattr(sim_control, "col", db)
     # Keep the unit test off Redis regardless of local .env.
     monkeypatch.setattr(routes_admin.queue, "trim_anomaly_stream", lambda: False)
     return db
