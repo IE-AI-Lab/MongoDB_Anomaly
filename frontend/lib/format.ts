@@ -89,14 +89,14 @@ export function thresholdsForMetric(
   metric: string
 ): { max?: number; min?: number } {
   if (!rules) return {};
+  // Threshold keys follow the exact `max_allowed_<metric>` / `min_allowed_<metric>`
+  // contract (e.g. max_allowed_temp_celsius). Match exactly — a substring match on
+  // the metric's first token would collide between metrics sharing a prefix.
   const out: { max?: number; min?: number } = {};
-  for (const [k, v] of Object.entries(rules)) {
-    if (typeof v !== "number") continue;
-    if (k.startsWith("max_allowed_") && k.includes(metric.split("_")[0])) out.max = v;
-    if (k.startsWith("min_allowed_") && k.includes(metric.split("_")[0])) out.min = v;
-    if (k === `max_allowed_${metric}`) out.max = v;
-    if (k === `min_allowed_${metric}`) out.min = v;
-  }
+  const max = rules[`max_allowed_${metric}`];
+  const min = rules[`min_allowed_${metric}`];
+  if (typeof max === "number") out.max = max;
+  if (typeof min === "number") out.min = min;
   return out;
 }
 

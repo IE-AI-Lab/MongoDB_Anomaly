@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { MachineCard } from "@/components/MachineCard";
@@ -16,6 +16,19 @@ import type { Anomaly } from "@/lib/types";
 // would reset on remount and re-fire them).
 const toastSeen = new Set<string>();
 let toastPrimed = false;
+
+// Cap the seen-set so a long-running session can't grow it without bound. Set
+// preserves insertion order, so dropping from the front evicts the oldest ids —
+// far older than any anomaly still in the live poll window.
+const TOAST_SEEN_MAX = 500;
+function markToastSeen(id: string) {
+  toastSeen.add(id);
+  while (toastSeen.size > TOAST_SEEN_MAX) {
+    const oldest = toastSeen.values().next().value;
+    if (oldest === undefined) break;
+    toastSeen.delete(oldest);
+  }
+}
 
 export default function DashboardPage() {
   const {
@@ -49,29 +62,53 @@ export default function DashboardPage() {
     );
     if (!toastPrimed) {
       // First load this session: record what already exists without toasting it.
-      active.forEach((a) => toastSeen.add(a.anomaly_id));
+      active.forEach((a) => markToastSeen(a.anomaly_id));
       toastPrimed = true;
       return;
     }
     const fresh = active.filter((a) => !toastSeen.has(a.anomaly_id));
     if (fresh.length) {
-      fresh.forEach((a) => toastSeen.add(a.anomaly_id));
+      fresh.forEach((a) => markToastSeen(a.anomaly_id));
       setToasts((prev) =>
         [...fresh.map((a) => ({ anomaly: a, id: a.anomaly_id })), ...prev].slice(0, 4)
       );
     }
   }, [anomalies, loading]);
 
-  // Auto-dismiss each toast after 12s.
+  // Auto-dismiss each toast 12s after IT appears. Keyed per-id in a ref so a new
+  // toast arriving does not reset the timers of toasts already on screen (which
+  // would let an old toast overstay, or never dismiss under a steady stream).
+  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   useEffect(() => {
-    if (toasts.length === 0) return;
-    const timers = toasts.map((t) =>
-      setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== t.id)), 12000)
-    );
-    return () => timers.forEach(clearTimeout);
+    const timers = timersRef.current;
+    for (const t of toasts) {
+      if (timers.has(t.id)) continue;
+      timers.set(
+        t.id,
+        setTimeout(() => {
+          setToasts((prev) => prev.filter((x) => x.id !== t.id));
+          timers.delete(t.id);
+        }, 12000)
+      );
+    }
   }, [toasts]);
+  // Clear every pending timer on unmount.
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach(clearTimeout);
+      timers.clear();
+    };
+  }, []);
 
-  const dismiss = (id: string) => setToasts((prev) => prev.filter((t) => t.id !== id));
+  const dismiss = (id: string) => {
+    const timer = timersRef.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      timersRef.current.delete(id);
+    }
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
 
   return (
     <div className="space-y-6">

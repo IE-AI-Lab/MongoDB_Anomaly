@@ -19,7 +19,11 @@ import { usePolling } from "./usePolling";
 const READINGS_MS = 4000;
 const ANOMALIES_MS = 4000;
 const STAFF_MS = 8000;
-const SIM_MS = 5000;
+// "Static-ish" config is still polled slowly (not fetched once) so a transient
+// API failure at mount self-heals instead of leaving the dashboard permanently
+// empty until a full page reload.
+const SENSORS_MS = 30000;
+const THRESHOLDS_MS = 60000;
 const READINGS_WINDOW_MIN = 30;
 
 export interface DashboardData {
@@ -28,26 +32,21 @@ export interface DashboardData {
   thresholds: SystemMetadata[];
   anomalies: Anomaly[];
   staff: Staff[];
-  simRunning: boolean;
   loading: boolean;
   error?: Error;
-  controls: {
-    start: () => Promise<void>;
-    stop: () => Promise<void>;
-    reset: () => Promise<void>;
-  };
-  refreshAll: () => void;
 }
 
+// Sim run/pause state is owned by <SimControls/>, which polls /simulation/status
+// itself — so it is intentionally NOT fetched here (avoids a duplicate poll and a
+// second source of truth).
 export function useDashboardData(): DashboardData {
-  const sensorsQ = usePolling(() => api.listSensors(), 0); // static-ish; fetch once
+  const sensorsQ = usePolling(() => api.listSensors(), SENSORS_MS);
   const thresholdsQ = usePolling(
     () => api.getSystemMetadata({ config_type: "anomaly_thresholds" }),
-    0
+    THRESHOLDS_MS
   );
   const anomaliesQ = usePolling(() => api.listAnomalies({ limit: 100 }), ANOMALIES_MS);
   const staffQ = usePolling(() => api.listStaff(), STAFF_MS);
-  const simQ = usePolling(() => api.simStatus(), SIM_MS);
 
   const sensors = sensorsQ.data ?? [];
 
@@ -85,39 +84,13 @@ export function useDashboardData(): DashboardData {
     };
   }, [pullReadings]);
 
-  const controls = {
-    start: async () => {
-      await api.simStart();
-      simQ.refresh();
-    },
-    stop: async () => {
-      await api.simStop();
-      simQ.refresh();
-    },
-    reset: async () => {
-      await api.simReset();
-      anomaliesQ.refresh();
-      staffQ.refresh();
-      setReadingsBySensor({});
-    },
-  };
-
   return {
     sensors,
     readingsBySensor,
     thresholds: thresholdsQ.data ?? [],
     anomalies: anomaliesQ.data ?? [],
     staff: staffQ.data ?? [],
-    simRunning: simQ.data?.running ?? true,
     loading: sensorsQ.loading || anomaliesQ.loading,
     error: sensorsQ.error || anomaliesQ.error,
-    controls,
-    refreshAll: () => {
-      sensorsQ.refresh();
-      anomaliesQ.refresh();
-      staffQ.refresh();
-      simQ.refresh();
-      pullReadings();
-    },
   };
 }
