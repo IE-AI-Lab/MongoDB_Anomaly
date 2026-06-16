@@ -125,3 +125,15 @@ def test_reset_queues_endpoint(monkeypatch):
     result = routes_admin.reset_queues()
     assert result["consumer_groups_recreated"] is True
     assert result["streams_deleted"]["anomaly:high"] is True
+
+
+def test_queues_status_endpoint(monkeypatch):
+    monkeypatch.setattr(
+        routes_admin.queue,
+        "stream_depths",
+        lambda: {"available": True, "streams": {"high": 1, "medium": 0, "low": 3}, "dlq": 2},
+    )
+    result = routes_admin.queues_status()
+    assert result["available"] is True
+    assert result["streams"]["low"] == 3
+    assert result["dlq"] == 2

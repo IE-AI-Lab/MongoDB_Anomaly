@@ -43,6 +43,12 @@ class ResetRequest(BaseModel):
     purge_feedback_knowledge: bool = False
 
 
+@router.get("/queues/status")
+def queues_status() -> dict[str, Any]:
+    """Per-severity stream depths + DLQ count for the dashboard queue panel."""
+    return queue.stream_depths()
+
+
 @router.post("/queues/reset")
 def reset_queues() -> dict[str, Any]:
     """Wipe Redis anomaly streams only (high/medium/low + dlq). Mongo untouched."""

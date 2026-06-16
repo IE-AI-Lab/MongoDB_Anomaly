@@ -136,6 +136,28 @@ def reset_anomaly_streams() -> dict[str, Any]:
     return {"streams_deleted": deleted, "consumer_groups_recreated": True}
 
 
+def stream_depths() -> dict[str, Any]:
+    """Per-severity stream lengths + DLQ depth, for the dashboard queue panel.
+
+    Reports XLEN per stream (an approximate backlog — entries linger until
+    trimmed) and the DLQ length (an exact count of dead-lettered jobs). Fail-open
+    when dispatch isn't redis or Redis is unreachable, so the panel degrades to
+    zeros (`available: false`) rather than erroring.
+    """
+    severity_streams = config.anomaly_severity_streams()  # {"high": "anomaly:high", ...}
+    empty = {sev: 0 for sev in severity_streams}
+    if config.agent_dispatch() != "redis":
+        return {"available": False, "reason": "AGENT_DISPATCH is not redis", "streams": empty, "dlq": 0}
+    try:
+        r = _redis()
+        depths = {sev: int(r.xlen(key)) for sev, key in severity_streams.items()}
+        dlq = int(r.xlen(config.anomaly_dlq_stream()))
+        return {"available": True, "streams": depths, "dlq": dlq}
+    except Exception as exc:  # noqa: BLE001 — the status panel must never error
+        log.warning("failed to read anomaly stream depths: %s", exc)
+        return {"available": False, "reason": str(exc), "streams": empty, "dlq": 0}
+
+
 def trim_anomaly_stream() -> bool:
     """
     Drop all jobs from every anomaly stream.

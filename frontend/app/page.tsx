@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { MachineCard } from "@/components/MachineCard";
 import { WorkerPanel } from "@/components/WorkerPanel";
+import { QueuePanel } from "@/components/QueuePanel";
 import { AlertsPanel } from "@/components/AlertsPanel";
 import { AlertToastStack, type ToastItem } from "@/components/AlertToast";
 import { SimControls } from "@/components/SimControls";
@@ -165,9 +166,10 @@ export default function DashboardPage() {
           <AlertsPanel anomalies={anomalies} />
         </div>
 
-        {/* Right rail: field workers, spanning beside machines + alerts */}
-        <div>
+        {/* Right rail: field workers + agent queue depth, beside machines + alerts */}
+        <div className="space-y-6">
           <WorkerPanel staff={staff} />
+          <QueuePanel />
         </div>
       </div>
 

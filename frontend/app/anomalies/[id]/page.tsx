@@ -10,7 +10,13 @@ import { buttonClasses } from "@/components/ui/Button";
 import { LoadingRow } from "@/components/ui/Spinner";
 import { AssignWorker } from "@/components/AssignWorker";
 import { AgentTrace } from "@/components/AgentTrace";
-import { SEVERITY_BADGE, STATUS_BADGE, formatDateTime } from "@/lib/format";
+import {
+  SEVERITY_BADGE,
+  STATUS_BADGE,
+  detectionMethodBadge,
+  detectionMethodLabel,
+  formatDateTime,
+} from "@/lib/format";
 import clsx from "clsx";
 
 function similarCaseText(c: SimilarCase | string): { title: string; body: string } {
@@ -95,6 +101,17 @@ export default function ReportPage({ params }: { params: { id: string } }) {
               {anomaly.status}
             </span>
             <span className="font-mono text-xs text-mongo-slate">{anomaly.error_code}</span>
+            {anomaly.detection_method && (
+              <span
+                className={clsx(
+                  "rounded px-1.5 py-0.5 text-[10px] font-medium",
+                  detectionMethodBadge(anomaly.detection_method)
+                )}
+                title="How the detector flagged this anomaly"
+              >
+                {detectionMethodLabel(anomaly.detection_method)}
+              </span>
+            )}
             <span className="text-xs text-mongo-mist">{formatDateTime(anomaly.timestamp_utc)}</span>
           </div>
         </div>

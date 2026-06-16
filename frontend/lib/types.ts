@@ -5,6 +5,8 @@ export type MetricType = "environment" | "vibration" | "pressure" | "flow";
 export type SeverityType = "low" | "medium" | "high";
 export type AnomalyStatus = "unresolved" | "analyzed" | "assigned" | "resolved";
 export type StaffRole = "staff" | "senior" | "manager";
+// How the detector flagged an anomaly (see ingestor_service/detector/detect.py).
+export type DetectionMethod = "threshold" | "rate_of_change" | "statistical";
 
 export interface Sensor {
   sensor_id: string;
@@ -31,12 +33,23 @@ export interface Reading {
   };
 }
 
+// Threshold anomalies carry limit/unit/consecutive_count; the rate-of-change and
+// statistical detectors instead carry their own fields (pct_change, z_score, ...).
 export interface TriggerValue {
   metric: string;
   observed: number;
-  limit: number;
-  unit: string;
-  consecutive_count: number;
+  limit?: number;
+  unit?: string;
+  consecutive_count?: number;
+  previous?: number;
+  pct_change?: number;
+  pct_threshold?: number;
+  z_score?: number;
+  z_threshold?: number;
+  baseline_mean?: number;
+  baseline_std?: number;
+  baseline_size?: number;
+  [k: string]: number | string | undefined;
 }
 
 export interface SimilarCase {
@@ -55,6 +68,7 @@ export interface Anomaly {
   equipment_id?: string;
   metric_type?: MetricType;
   error_code: string;
+  detection_method?: DetectionMethod;
   severity_level: number;
   severity_type: SeverityType;
   breach_ratio?: number;
@@ -139,6 +153,14 @@ export interface SystemMetadata {
 
 export interface SimStatus {
   running: boolean;
+}
+
+// GET /queues/status — per-severity Redis stream depths + dead-letter count.
+export interface QueueStatus {
+  available: boolean;
+  reason?: string;
+  streams: Record<SeverityType, number>;
+  dlq: number;
 }
 
 export type KnowledgeSource = "seed" | "feedback" | "manual";

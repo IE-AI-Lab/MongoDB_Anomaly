@@ -8,6 +8,7 @@ import type {
   KnowledgeDoc,
   KnowledgeSource,
   MetricType,
+  QueueStatus,
   Reading,
   Sensor,
   SimStatus,
@@ -118,6 +119,9 @@ export const api = {
     request<{ deleted: boolean }>(`/knowledge/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
+
+  // --- queue / pipeline ---
+  queueStatus: () => request<QueueStatus>(`/queues/status`),
 
   // --- simulation control ---
   simStatus: () => request<SimStatus>(`/simulation/status`),

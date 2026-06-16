@@ -15,6 +15,10 @@ class _FakeRedis:
         self.adds: list[tuple] = []
         self.groups: list[tuple] = []
         self.deleted: list[str] = []
+        self.lengths: dict[str, int] = {}
+
+    def xlen(self, name):
+        return self.lengths.get(name, 0)
 
     def xadd(self, name, fields, maxlen=None, approximate=None):
         self.adds.append((name, fields, maxlen, approximate))
@@ -139,6 +143,30 @@ def test_ensure_anomaly_stream_skipped_for_stub(monkeypatch):
     monkeypatch.setattr(queue, "_redis", lambda: fake)
     queue.ensure_anomaly_stream()
     assert fake.groups == []
+
+
+def test_stream_depths_reports_per_severity_and_dlq(monkeypatch):
+    fake = _FakeRedis()
+    fake.lengths = {
+        "anomaly:high": 2,
+        "anomaly:medium": 0,
+        "anomaly:low": 5,
+        "anomaly:dlq": 1,
+    }
+    monkeypatch.setattr(queue, "_redis", lambda: fake)
+
+    result = queue.stream_depths()
+    assert result["available"] is True
+    assert result["streams"] == {"high": 2, "medium": 0, "low": 5}
+    assert result["dlq"] == 1
+
+
+def test_stream_depths_fail_open_when_not_redis(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH", "stub")
+    result = queue.stream_depths()
+    assert result["available"] is False
+    assert result["streams"] == {"high": 0, "medium": 0, "low": 0}
+    assert result["dlq"] == 0
 
 
 def test_reset_anomaly_streams_deletes_and_recreates(monkeypatch):

@@ -51,6 +51,19 @@ export const ROLE_LABEL: Record<string, string> = {
   manager: "Manager",
 };
 
+// How an anomaly was detected (detector/detect.py: threshold / rate_of_change /
+// statistical). Short label + a muted badge class for the alert views.
+const DETECTION_METHOD_META: Record<string, { label: string; badge: string }> = {
+  threshold: { label: "Threshold", badge: "bg-mongo-border text-mongo-slate" },
+  rate_of_change: { label: "Rate of change", badge: "bg-[#FEF3C7] text-[#92580C]" },
+  statistical: { label: "Statistical", badge: "bg-[#E1F7FF] text-[#095896]" },
+};
+
+export const detectionMethodLabel = (m?: string) =>
+  m ? DETECTION_METHOD_META[m]?.label ?? m.replace(/_/g, " ") : "";
+export const detectionMethodBadge = (m?: string) =>
+  (m && DETECTION_METHOD_META[m]?.badge) || "bg-mongo-border text-mongo-slate";
+
 export function formatTime(iso?: string): string {
   if (!iso) return "—";
   const d = new Date(iso);
