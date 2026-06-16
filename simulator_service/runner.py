@@ -25,7 +25,7 @@ from .generators import (
     generate_vibration,
     pick_fault,
 )
-from .http_client import post_telemetry
+from .http_client import get_simulation_status, post_telemetry
 from .spec import SensorSpec, SENSORS
 
 
@@ -45,9 +45,9 @@ def build_event(
     sensor: SensorSpec,
     state: SensorRuntimeState,
     forced_fault: FaultMode | None = None,
-    prob_low: float = 0.08,
-    prob_med: float = 0.04,
-    prob_high: float = 0.02,
+    prob_low: float = 0.004,
+    prob_med: float = 0.002,
+    prob_high: float = 0.001,
 ) -> dict[str, Any]:
     """
     Build one telemetry event for a sensor.
@@ -87,11 +87,11 @@ def run(
     base_url: str,
     tick_seconds: int = 5,
     emit_probability: float = 0.7,
-    prob_low: float = 0.08,
-    prob_med: float = 0.04,
-    prob_high: float = 0.02,
+    prob_low: float = 0.004,
+    prob_med: float = 0.002,
+    prob_high: float = 0.001,
     deterministic_demo: bool = False,
-    demo_interval_ticks: int = 10,
+    demo_interval_ticks: int = 60,
 ) -> None:
     """
     Start the simulator loop.
@@ -115,6 +115,14 @@ def run(
     tick = 0
     while True:
         tick += 1
+
+        # Run/pause flag, controlled by the UI Start/Stop buttons via the API.
+        # Fail-open inside get_simulation_status, so a control-plane error never
+        # freezes the loop; we just keep emitting.
+        if not get_simulation_status(base_url):
+            print(f"[SIM] tick={tick} paused (simulation stopped)")
+            time.sleep(tick_seconds)
+            continue
 
         shuffled = list(SENSORS)
         random.shuffle(shuffled)

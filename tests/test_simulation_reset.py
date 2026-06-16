@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from ingestor_service.api import admin as routes_admin
+from ingestor_service.services import simulation_control as sim_control
 
 from tests.fakes import FakeDB
 
@@ -35,9 +36,17 @@ def fake_db(monkeypatch):
             {"document_id": "fb-1234", "is_active": False},
         ],
     )
+    db.add_collection("system_metadata", [])
     monkeypatch.setattr(routes_admin, "col", db)
+    # The sim run/pause endpoints delegate to services.simulation_control, which
+    # holds its own `col` reference — patch it to the same fake DB.
+    monkeypatch.setattr(sim_control, "col", db)
     # Keep the unit test off Redis regardless of local .env.
-    monkeypatch.setattr(routes_admin.queue, "trim_anomaly_stream", lambda: False)
+    monkeypatch.setattr(
+        routes_admin.queue,
+        "reset_anomaly_streams",
+        lambda: {"skipped": True, "reason": "test"},
+    )
     return db
 
 
@@ -76,4 +85,55 @@ def test_reset_is_idempotent(fake_db):
     routes_admin.reset_simulation(routes_admin.ResetRequest())
     result = routes_admin.reset_simulation(routes_admin.ResetRequest())
     assert all(v == 0 for v in result["deleted"].values())
-    assert result["redis_stream_trimmed"] is False
+    assert result["redis_streams"]["skipped"] is True
+
+
+def test_reset_clears_debounce_state(fake_db):
+    # Seed an in-memory debounce counter, then ensure reset wipes it.
+    routes_admin.state.get_counter("SENS-1", "temp_celsius").consecutive_violations = 5
+    result = routes_admin.reset_simulation(routes_admin.ResetRequest())
+    assert result["debounce_state_cleared"] is True
+    assert routes_admin.state._STATE == {}
+
+
+def test_simulation_status_defaults_to_running(fake_db):
+    # No simulation_control doc seeded -> fail-open to running.
+    assert routes_admin.simulation_status() == {"running": True}
+
+
+def test_simulation_stop_then_start_round_trip(fake_db):
+    assert routes_admin.simulation_stop() == {"running": False}
+    assert routes_admin.simulation_status() == {"running": False}
+    assert routes_admin.simulation_start() == {"running": True}
+    assert routes_admin.simulation_status() == {"running": True}
+
+
+def test_reset_queues_endpoint(monkeypatch):
+    monkeypatch.setattr(
+        routes_admin.queue,
+        "reset_anomaly_streams",
+        lambda: {
+            "streams_deleted": {
+                "anomaly:high": True,
+                "anomaly:medium": True,
+                "anomaly:low": True,
+                "anomaly:dlq": True,
+            },
+            "consumer_groups_recreated": True,
+        },
+    )
+    result = routes_admin.reset_queues()
+    assert result["consumer_groups_recreated"] is True
+    assert result["streams_deleted"]["anomaly:high"] is True
+
+
+def test_queues_status_endpoint(monkeypatch):
+    monkeypatch.setattr(
+        routes_admin.queue,
+        "stream_depths",
+        lambda: {"available": True, "streams": {"high": 1, "medium": 0, "low": 3}, "dlq": 2},
+    )
+    result = routes_admin.queues_status()
+    assert result["available"] is True
+    assert result["streams"]["low"] == 3
+    assert result["dlq"] == 2

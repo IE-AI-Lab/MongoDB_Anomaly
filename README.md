@@ -16,13 +16,14 @@ API by the agent team — it lives elsewhere and is not in this repo.
  simulator_service ──HTTP──▶ ingestor_service (FastAPI) ──▶ MongoDB Atlas
                                    │                          ├ telemetry_history (time-series)
                                    ├ api/ (HTTP routers)      ├ anomalies
-                                   ├ detector/ (thresholds,   ├ sensors
-                                   │   severity, debounce)    ├ staff_on_call
+                                   ├ detector/ (threshold +   ├ sensors
+                                   │   rate-of-change +        ├ staff_on_call
+                                   │   statistical, severity)  │
                                    ├ messaging/queue ─XADD─▶ Redis ├ knowledge_base (+ vector index)
                                    ├ services/rag ─$vectorSearch─▶ ├ system_metadata
                                    └ core/ (config, db)        ├ agent_execution_logs
                                                                └ session_events
-        agent_worker ──XREADGROUP──▶ Redis (anomaly:jobs)
+        agent_worker ──XREADGROUP──▶ Redis (anomaly:high → :medium → :low, DLQ :dlq)
               │
               └──HTTP──▶ read/write API ──▶ MongoDB Atlas
               └──chat──▶ Groq (LangGraph — wire in agent_worker/consumer.py)
@@ -134,11 +135,16 @@ python -m agent_worker.main
 python -m simulator_service.main --base-url http://localhost:8000 --deterministic-demo
 ```
 
-When an anomaly is detected, the ingestor **XADD**s `{ anomaly_id, ... }` to the
-Redis stream `anomaly:jobs`. The agent worker **XREADGROUP**s with a 20s block
-(`AGENT_CONSUMER_BLOCK_MS`), fetches full context via the read API, and **XACK**s
-when done. Replace `process_anomaly_job()` in `agent_worker/consumer.py` with
-your LangGraph graph.
+When an anomaly is detected, the ingestor **XADD**s `{ anomaly_id, ... }` to a
+**per-severity** Redis stream — `anomaly:high`, `anomaly:medium`, or
+`anomaly:low` — chosen from the anomaly's `severity_type`. The agent worker
+drains these in priority order (high → medium → low), **XREADGROUP**ing with a
+20s block (`AGENT_CONSUMER_BLOCK_MS`), fetches full context via the read API, and
+**XACK**s when done.
+
+If a job throws, it is requeued to its source stream with an incremented
+`attempts` count; after `ANOMALY_MAX_RETRIES` (default 3) it is moved to the
+dead-letter stream `anomaly:dlq` instead of being retried forever.
 
 Interactive API docs at `http://localhost:8000/docs`.
 
@@ -208,7 +214,75 @@ Dashboard panels:
 - **Agent Job Duration p95 (s):** p95 worker processing latency.
 - **Agent Failures:** failure rate for worker jobs left pending for retry.
 - **API Requests by Route (req/s):** per-endpoint request rate (FastAPI auto-instrumentation).
-- **Redis Queue (anomaly:jobs):** stream length and unacknowledged (pending) jobs for the consumer group.
+- **Redis Queues by Severity:** per-stream length + pending for `anomaly:high|medium|low` and the `anomaly:dlq` dead-letter stream.
+
+Reset streams before a monitoring run so `len` starts at 0:
+
+```bash
+# API running (honcho api):
+./scripts/reset_redis_queues.sh
+
+# Or without the API:
+./scripts/reset_redis_queues.sh --direct
+
+# Full demo reset (Mongo + detector state + Redis):
+curl -X POST http://localhost:8000/simulation/reset
+```
+
+---
+
+## Anomaly detection
+
+The detector runs three detectors per metric, in priority order — the first to
+fire wins (one anomaly per telemetry document):
+
+1. **Threshold** *(always on)* — value crosses a static limit
+   (`system_metadata.anomaly_thresholds`) for N consecutive readings. Severity
+   comes from how far past the limit the value is.
+2. **Rate-of-change** *(env-gated: `ANOMALY_ROC_ENABLED`)* — value jumps more
+   than `ANOMALY_ROC_PCT` (e.g. 30%) versus the previous reading. Catches fast
+   excursions that are still within static limits. Emits
+   `{METRIC}_RAPID_RISE` / `{METRIC}_RAPID_DROP`.
+3. **Statistical** *(env-gated: `ANOMALY_STAT_ENABLED`)* — value is a z-score
+   outlier (`|z| > ANOMALY_STAT_ZSCORE`) versus a rolling baseline of the last
+   `ANOMALY_STAT_MIN_READINGS`+ values. Emits `{METRIC}_OUTLIER`.
+
+Windows are **count-based** (last `ANOMALY_WINDOW_SIZE` readings) rather than
+time-based, because the simulator/pipeline runs intermittently — "last N
+readings" is more reliable than "last N minutes". Each anomaly records a
+`detection_method` field (`threshold` | `rate_of_change` | `statistical`) and
+detector-specific stats under `trigger_value` (e.g. `pct_change`, `z_score`).
+
+> The new rate-of-change/statistical error codes don't have seeded knowledge
+> docs yet, so RAG retrieval for them falls back gracefully. Seed
+> `{METRIC}_RAPID_RISE` etc. into `knowledge_base` if you want tailored guidance.
+
+---
+
+## Frontend (operator dashboard)
+
+A MongoDB Atlas–styled Next.js console lives in [`frontend/`](frontend/) — an
+external HTTP-API consumer (imports nothing from the Python services). Dashboard
+(live machine charts + workers + alerts + Start/Stop/Reset + new-alert toasts),
+agent report + worker assignment, worker-feedback (closes the RAG loop), and a
+knowledge CRUD + review-queue page.
+
+```bash
+cd frontend
+cp .env.local.example .env.local   # optional; defaults to http://127.0.0.1:8000
+npm install
+npm run dev                         # http://localhost:3000
+```
+
+Browser → API calls are proxied through Next at `/backend/*` (set
+`DATA_LAYER_BASE_URL`), so no CORS config is needed. The data layer must be up
+(`uvicorn ... --port 8000` or `honcho start`) and seeded (`python -m scripts.init_db`).
+
+> **Port note:** Next dev and the optional Grafana stack both default to **3000**.
+> If you run monitoring too, start the frontend on another port:
+> `npm run dev -- -p 3001`.
+
+See [`frontend/README.md`](frontend/README.md) for the page/route map.
 
 ---
 
@@ -248,8 +322,10 @@ Base URL: `http://localhost:8000`. All responses are JSON with Mongo `_id` strip
 |--------|------|--------------|---------|
 | `GET` | `/anomalies/{anomaly_id}` | — | one anomaly |
 | `GET` | `/anomalies` | `status`, `sensor_id`, `limit` (1–500) | list, newest first |
+| `GET` | `/sensors` | `is_active` (default true), `metric_type` | list of machines/sensors |
 | `GET` | `/sensors/{sensor_id}` | — | one sensor |
 | `GET` | `/sensors/{sensor_id}/readings` | `minutes` (1–1440), `limit` (1–2000) | recent telemetry |
+| `GET` | `/system_metadata` | `config_type`, `target_metric` | threshold + severity-band config (chart limit lines) |
 | `GET` | `/knowledge/search` | `q` (required), `equipment_type`, `error_codes` (CSV), `k` (1–20) | ranked knowledge docs |
 | `GET` | `/staff_on_call` | `is_on_call`, `specialization`, `handled_severity_type`, `facility_id` | staff, by escalation rank |
 
@@ -279,7 +355,11 @@ approves it — a guardrail against poisoning RAG with bad field notes.
 
 | Method | Path | Body | Effect |
 |--------|------|------|--------|
-| `POST` | `/simulation/reset` | `{purge_feedback_knowledge?: false}` | purges anomalies, telemetry, agent logs, session events; restores all staff to on-call; trims the Redis job stream; seed data untouched. Restart the simulator to reset its sequence counters. |
+| `POST` | `/queues/reset` | — | wipes Redis anomaly streams only (`anomaly:high|medium|low`, `anomaly:dlq`); Mongo untouched. Use before a monitoring run for fresh Grafana `len`/`pending` counters. |
+| `POST` | `/simulation/reset` | `{purge_feedback_knowledge?: false}` | full demo reset: purges anomalies, telemetry, agent logs, session events; restores all staff to on-call; clears in-memory detector debounce state; wipes the per-severity Redis streams + DLQ; seed data untouched. Restart the simulator to reset its sequence counters. |
+| `GET`  | `/simulation/status` | — | `{running}` — simulator polls this each tick (fail-open to running) |
+| `POST` | `/simulation/start` | — | resume telemetry emission (`{running:true}`) |
+| `POST` | `/simulation/stop` | — | pause telemetry emission (`{running:false}`); the simulator process stays alive |
 
 #### Example agent flow
 

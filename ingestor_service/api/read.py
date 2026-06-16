@@ -49,6 +49,23 @@ def list_anomalies(
     return [_strip_mongo_id(d) for d in cursor]
 
 
+@router.get("/sensors")
+def list_sensors(
+    is_active: Optional[bool] = Query(True, description="filter by active flag; pass false for all-inactive"),
+    metric_type: Optional[str] = Query(
+        None, description="environment / vibration / pressure / flow"
+    ),
+) -> list[dict[str, Any]]:
+    """List machines (sensors) for the dashboard grid."""
+    q: dict[str, Any] = {}
+    if is_active is not None:
+        q["is_active"] = is_active
+    if metric_type:
+        q["metric_type"] = metric_type
+    cursor = col("sensors").find(q).sort("sensor_id", 1)
+    return [_strip_mongo_id(s) for s in cursor]
+
+
 @router.get("/sensors/{sensor_id}")
 def get_sensor(sensor_id: str) -> dict[str, Any]:
     doc = col("sensors").find_one({"sensor_id": sensor_id})
@@ -107,3 +124,22 @@ def list_on_call(
         q["facility_ids"] = facility_id
     cursor = col("staff_on_call").find(q).sort("escalation_rank", 1)
     return [_strip_mongo_id(s) for s in cursor]
+
+
+@router.get("/system_metadata")
+def list_system_metadata(
+    config_type: Optional[str] = Query(
+        None, description="anomaly_thresholds / severity_bands / simulation_control"
+    ),
+    target_metric: Optional[str] = Query(
+        None, description="e.g. temp_celsius, amplitude_mm, or '*'"
+    ),
+) -> list[dict[str, Any]]:
+    """Config docs (thresholds + severity bands) — the dashboard draws chart limit lines from these."""
+    q: dict[str, Any] = {}
+    if config_type:
+        q["config_type"] = config_type
+    if target_metric:
+        q["target_metric"] = target_metric
+    cursor = col("system_metadata").find(q)
+    return [_strip_mongo_id(d) for d in cursor]

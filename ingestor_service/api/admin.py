@@ -21,6 +21,8 @@ from pydantic import BaseModel
 
 from ..messaging import queue
 from ..core.db import col
+from ..detector import state
+from ..services import simulation_control
 
 router = APIRouter(tags=["admin"])
 
@@ -39,6 +41,18 @@ _RUNTIME_COLLECTIONS: tuple[str, ...] = (
 class ResetRequest(BaseModel):
     # fb-* docs awaiting curation survive a reset unless explicitly purged.
     purge_feedback_knowledge: bool = False
+
+
+@router.get("/queues/status")
+def queues_status() -> dict[str, Any]:
+    """Per-severity stream depths + DLQ count for the dashboard queue panel."""
+    return queue.stream_depths()
+
+
+@router.post("/queues/reset")
+def reset_queues() -> dict[str, Any]:
+    """Wipe Redis anomaly streams only (high/medium/low + dlq). Mongo untouched."""
+    return queue.reset_anomaly_streams()
 
 
 @router.post("/simulation/reset")
@@ -62,12 +76,41 @@ def reset_simulation(req: ResetRequest) -> dict[str, Any]:
             .deleted_count
         )
 
+    # Clear in-process detector debounce counters so a fresh run does not carry
+    # over consecutive-violation state from the previous demo.
+    state.reset_all()
+
     return {
         "deleted": deleted,
         "staff_reset": staff_result.modified_count,
-        "redis_stream_trimmed": queue.trim_anomaly_stream(),
+        "debounce_state_cleared": True,
+        # Per-severity streams + DLQ are wiped and the consumer groups recreated.
+        "redis_streams": queue.reset_anomaly_streams(),
         "note": (
             "simulator sequence_number is in-process client state — "
             "restart the simulator to reset it"
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# Simulation run/pause control — UI Start/Stop buttons; simulator polls status
+# ---------------------------------------------------------------------------
+
+
+@router.get("/simulation/status")
+def simulation_status() -> dict[str, bool]:
+    """Current run state. The simulator polls this each tick (fail-open to running)."""
+    return {"running": simulation_control.is_running()}
+
+
+@router.post("/simulation/start")
+def simulation_start() -> dict[str, bool]:
+    """Resume telemetry emission."""
+    return {"running": simulation_control.set_running(True)}
+
+
+@router.post("/simulation/stop")
+def simulation_stop() -> dict[str, bool]:
+    """Pause telemetry emission (the simulator process stays alive)."""
+    return {"running": simulation_control.set_running(False)}

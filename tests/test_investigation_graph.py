@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from agent_worker.investigation_agent import _enrich_from_tool_messages, _fallback_decision
+from agent_worker.decision_parser import enrich_from_tool_messages
+from agent_worker.investigation_agent import _fallback_decision
 
 
 def test_fallback_decision_includes_error_code():
@@ -35,7 +36,7 @@ def test_enrich_from_tool_messages():
             '{"staff_candidates": [{"employee_id": "EMP-002"}]}',
         ),
     ]
-    enriched = _enrich_from_tool_messages(decision, messages)
+    enriched = enrich_from_tool_messages(decision, messages)
     assert enriched["rag_query_used"] == "pump vibration"
     assert enriched["recommended_employee_id"] == "EMP-002"
     assert enriched["staff_lookup_used"] is True

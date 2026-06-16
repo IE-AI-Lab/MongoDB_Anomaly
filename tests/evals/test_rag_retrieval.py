@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -57,8 +58,24 @@ class CapturingKnowledgeCollection:
             out.append({k: v for k, v in doc.items() if k != "_id"})
         return out[:k]
 
-    def find(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - not used in these tests
-        raise AssertionError("find() should not be used when aggregate returns docs")
+    def find(self, query: dict[str, Any], projection: dict[str, int] | None = None) -> list[dict[str, Any]]:
+        # Lexical (keyword) half of hybrid search: active docs matching any $or
+        # regex condition on text_content / section_title.
+        ors = query.get("$or", [])
+
+        def matches(doc: dict[str, Any]) -> bool:
+            if query.get("is_active") and not doc.get("is_active"):
+                return False
+            if not ors:
+                return True
+            for cond in ors:
+                for field, rx in cond.items():
+                    pattern = rx.get("$regex") if isinstance(rx, dict) else rx
+                    if pattern and re.search(pattern, str(doc.get(field, "")), re.IGNORECASE):
+                        return True
+            return False
+
+        return [{k: v for k, v in d.items() if k != "_id"} for d in self.docs if matches(d)]
 
 
 @pytest.mark.parametrize("case", RAG_EVAL_CASES, ids=[c.name for c in RAG_EVAL_CASES])

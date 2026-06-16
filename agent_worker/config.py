@@ -17,6 +17,46 @@ def anomaly_consumer_group() -> str:
     return os.getenv("ANOMALY_CONSUMER_GROUP", "agent-workers")
 
 
+# --- Hybrid severity-based Redis routing -------------------------------------
+# Mirrors ingestor_service.core.config (separate process). The worker drains
+# {prefix}:high before :medium before :low, and routes exhausted jobs to
+# {prefix}:dlq.
+
+
+def anomaly_stream_prefix() -> str:
+    return os.getenv("ANOMALY_STREAM_PREFIX", "anomaly")
+
+
+def anomaly_priority_order() -> list[str]:
+    """Severity buckets in descending priority."""
+    return ["high", "medium", "low"]
+
+
+def anomaly_severity_streams() -> dict[str, str]:
+    """Map each severity bucket to its Redis stream key (high → low)."""
+    prefix = anomaly_stream_prefix()
+    return {sev: f"{prefix}:{sev}" for sev in anomaly_priority_order()}
+
+
+def anomaly_priority_streams() -> list[str]:
+    """Stream keys in the order the worker should drain them."""
+    streams = anomaly_severity_streams()
+    return [streams[sev] for sev in anomaly_priority_order()]
+
+
+def anomaly_dlq_stream() -> str:
+    return f"{anomaly_stream_prefix()}:dlq"
+
+
+def anomaly_max_retries() -> int:
+    """How many times a job may be retried before being sent to the DLQ."""
+    return int(os.getenv("ANOMALY_MAX_RETRIES", "3"))
+
+
+def anomaly_stream_maxlen() -> int:
+    return int(os.getenv("ANOMALY_STREAM_MAXLEN", "10000"))
+
+
 def consumer_name() -> str:
     return os.getenv("AGENT_CONSUMER_NAME", "worker-1")
 
@@ -29,31 +69,34 @@ def data_layer_base_url() -> str:
     return os.getenv("DATA_LAYER_BASE_URL", "http://localhost:8000").rstrip("/")
 
 
-# --- Chat / agent reasoning: Groq (OpenAI-compatible endpoint) ----------------
-# Mirrors ingestor_service.config but lives here because the worker is a separate
-# process. Used by the OpenAI SDK (NOT the native groq/langchain_groq SDKs — the
-# base URL already includes /openai/v1, which those would double up).
+# --- Chat / agent reasoning: any OpenAI-compatible provider -------------------
+# The investigation agent uses langchain_openai.ChatOpenAI, which talks to any
+# OpenAI-compatible endpoint (DeepSeek, Groq, OpenAI, ...). Configure the triple:
+#   LLM_BASE_URL  - OpenAI-compatible base (default DeepSeek)
+#   LLM_API_KEY   - key for that provider (falls back to DEEPSEEK_API_KEY/GROQ_API_KEY)
+#   CHAT_MODEL    - model id for that provider
+# Default is DeepSeek because Groq's free tier (6k TPM) is too small for the
+# ~7k-token tool-calling requests; DeepSeek's limits/context handle them.
 
 
-def groq_api_key() -> str:
-    """Groq API key. Empty ⇒ the graph skips LLM reasoning and uses the
-    deterministic fallback, so the worker still runs without a key."""
-    return os.getenv("GROQ_API_KEY", "")
+def llm_api_key() -> str:
+    """API key for the OpenAI-compatible LLM provider. Empty ⇒ the graph skips
+    LLM reasoning and uses the deterministic fallback (worker still runs)."""
+    return (
+        os.getenv("LLM_API_KEY")
+        or os.getenv("DEEPSEEK_API_KEY")
+        or os.getenv("GROQ_API_KEY", "")
+    )
 
 
-def groq_base_url() -> str:
-    """OpenAI-compatible endpoint — for the OpenAI SDK only."""
-    return os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
-
-
-def groq_native_api_base() -> str:
-    """Native Groq API root — for langchain_groq.ChatGroq (no /openai/v1 suffix)."""
-    raw = os.getenv("GROQ_API_BASE") or os.getenv("GROQ_BASE_URL", "https://api.groq.com")
-    return raw.removesuffix("/openai/v1").rstrip("/")
+def llm_base_url() -> str:
+    """OpenAI-compatible base URL. Default DeepSeek; set LLM_BASE_URL to switch
+    providers (e.g. https://api.groq.com/openai/v1)."""
+    return (os.getenv("LLM_BASE_URL") or "https://api.deepseek.com").rstrip("/")
 
 
 def chat_model() -> str:
-    return os.getenv("CHAT_MODEL", "llama-3.3-70b-versatile")
+    return os.getenv("CHAT_MODEL", "deepseek-chat")
 
 
 def otel_enabled() -> bool:
@@ -65,7 +108,9 @@ def otel_exporter_otlp_endpoint() -> str:
 
 
 def otel_service_name(default: str = "agent_worker") -> str:
-    return os.getenv("OTEL_SERVICE_NAME", default)
+    # Empty (OTEL_SERVICE_NAME=) means "unset" — fall back to the per-process
+    # default rather than reporting an empty service.name to the collector.
+    return os.getenv("OTEL_SERVICE_NAME") or default
 
 
 # --- Agent identity (written into agent_execution_logs traces) ----------------

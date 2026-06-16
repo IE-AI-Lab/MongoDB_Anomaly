@@ -34,28 +34,21 @@ def _redis():
 
 
 def ensure_anomaly_stream() -> None:
-    """Create the stream and consumer group if they do not exist yet."""
+    """Create the per-severity streams and their consumer group if missing."""
     if config.agent_dispatch() != "redis":
         return
 
     import redis
 
     r = _redis()
-    try:
-        r.xgroup_create(
-            name=config.anomaly_stream_key(),
-            groupname=config.anomaly_consumer_group(),
-            id="0",
-            mkstream=True,
-        )
-        log.info(
-            "created stream %s with group %s",
-            config.anomaly_stream_key(),
-            config.anomaly_consumer_group(),
-        )
-    except redis.ResponseError as exc:
-        if "BUSYGROUP" not in str(exc):
-            raise
+    group = config.anomaly_consumer_group()
+    for stream in config.anomaly_severity_streams().values():
+        try:
+            r.xgroup_create(name=stream, groupname=group, id="0", mkstream=True)
+            log.info("created stream %s with group %s", stream, group)
+        except redis.ResponseError as exc:
+            if "BUSYGROUP" not in str(exc):
+                raise
 
 
 def _stream_fields(anomaly_doc: dict[str, Any]) -> dict[str, str]:
@@ -71,27 +64,37 @@ def _stream_fields(anomaly_doc: dict[str, Any]) -> dict[str, str]:
         "error_code": str(anomaly_doc.get("error_code", "")),
         "severity_type": str(anomaly_doc.get("severity_type", "")),
         "severity_level": str(anomaly_doc.get("severity_level", "")),
+        "detection_method": str(anomaly_doc.get("detection_method", "")),
         "timestamp_utc": ts_str,
         "event_type": "anomaly_detected",
+        "attempts": "0",
     }
 
 
 def publish_anomaly_job(anomaly_doc: dict[str, Any]) -> Optional[str]:
     """
-    Append one anomaly job to the Redis stream.
+    Append one anomaly job to the severity-routed Redis stream.
 
-    Returns the Redis message id on success, or None if publish failed.
-    Failures are logged but do not propagate — the anomaly is already in Mongo.
+    The destination stream is chosen from the anomaly's severity_type
+    (high/medium/low) so the worker can prioritize. Returns the Redis message id
+    on success, or None if publish failed. Failures are logged but do not
+    propagate — the anomaly is already in Mongo.
     """
     anomaly_id = anomaly_doc.get("anomaly_id")
+    stream = config.anomaly_stream_for_severity(anomaly_doc.get("severity_type", ""))
     try:
         message_id = _redis().xadd(
-            name=config.anomaly_stream_key(),
+            name=stream,
             fields=_stream_fields(anomaly_doc),
             maxlen=config.anomaly_stream_maxlen(),
             approximate=True,
         )
-        log.info("queued anomaly job anomaly_id=%s message_id=%s", anomaly_id, message_id)
+        log.info(
+            "queued anomaly job anomaly_id=%s stream=%s message_id=%s",
+            anomaly_id,
+            stream,
+            message_id,
+        )
         return message_id
     except Exception as exc:
         log.warning(
@@ -102,23 +105,70 @@ def publish_anomaly_job(anomaly_doc: dict[str, Any]) -> Optional[str]:
         return None
 
 
-def trim_anomaly_stream() -> bool:
+def reset_anomaly_streams() -> dict[str, Any]:
     """
-    Drop all undelivered jobs from the anomaly stream (XTRIM maxlen=0).
+    Wipe all anomaly streams and recreate empty consumer groups.
 
-    Used by POST /simulation/reset so queued jobs don't reference purged
-    anomalies. XTRIM (unlike DEL) preserves the stream and its consumer group.
-    Best-effort: returns False if dispatch isn't redis or Redis is unreachable.
+    Deletes each stream key (clears both XLEN and XPENDING), then calls
+    ensure_anomaly_stream() so fresh empty streams exist for the next run.
+    Also removes the legacy single-stream key (ANOMALY_STREAM_KEY) if set.
     """
     if config.agent_dispatch() != "redis":
-        return False
+        return {"skipped": True, "reason": "AGENT_DISPATCH is not redis"}
+
+    streams = set(config.anomaly_severity_streams().values())
+    streams.add(config.anomaly_dlq_stream())
+    legacy = config.anomaly_stream_key()
+    if legacy:
+        streams.add(legacy)
+
+    r = _redis()
+    deleted: dict[str, bool] = {}
+    for stream in sorted(streams):
+        try:
+            deleted[stream] = bool(r.delete(stream))
+            log.info("deleted anomaly stream %s", stream)
+        except Exception as exc:
+            log.warning("failed to delete anomaly stream %s: %s", stream, exc)
+            deleted[stream] = False
+
+    ensure_anomaly_stream()
+    return {"streams_deleted": deleted, "consumer_groups_recreated": True}
+
+
+def stream_depths() -> dict[str, Any]:
+    """Per-severity stream lengths + DLQ depth, for the dashboard queue panel.
+
+    Reports XLEN per stream (an approximate backlog — entries linger until
+    trimmed) and the DLQ length (an exact count of dead-lettered jobs). Fail-open
+    when dispatch isn't redis or Redis is unreachable, so the panel degrades to
+    zeros (`available: false`) rather than erroring.
+    """
+    severity_streams = config.anomaly_severity_streams()  # {"high": "anomaly:high", ...}
+    empty = {sev: 0 for sev in severity_streams}
+    if config.agent_dispatch() != "redis":
+        return {"available": False, "reason": "AGENT_DISPATCH is not redis", "streams": empty, "dlq": 0}
     try:
-        _redis().xtrim(name=config.anomaly_stream_key(), maxlen=0)
-        log.info("trimmed anomaly stream %s", config.anomaly_stream_key())
-        return True
-    except Exception as exc:
-        log.warning("failed to trim anomaly stream: %s", exc)
+        r = _redis()
+        depths = {sev: int(r.xlen(key)) for sev, key in severity_streams.items()}
+        dlq = int(r.xlen(config.anomaly_dlq_stream()))
+        return {"available": True, "streams": depths, "dlq": dlq}
+    except Exception as exc:  # noqa: BLE001 — the status panel must never error
+        log.warning("failed to read anomaly stream depths: %s", exc)
+        return {"available": False, "reason": str(exc), "streams": empty, "dlq": 0}
+
+
+def trim_anomaly_stream() -> bool:
+    """
+    Drop all jobs from every anomaly stream.
+
+    Delegates to reset_anomaly_streams() for a full wipe (len=0, pending=0).
+    Used by POST /simulation/reset and POST /queues/reset.
+    """
+    result = reset_anomaly_streams()
+    if result.get("skipped"):
         return False
+    return all(result.get("streams_deleted", {}).values())
 
 
 def dispatch_anomaly(anomaly_doc: dict[str, Any]) -> None:
