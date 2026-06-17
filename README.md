@@ -247,7 +247,7 @@ auth (the dashboard currently has none).
 
 ---
 
-## Screenshots:
+## Screenshots
 
 **Dashboard** — live machine telemetry, field workers, recent alerts, and a
 new-anomaly toast:
@@ -261,4 +261,4 @@ new-anomaly toast:
 **Knowledge Base** — the RAG corpus the agent retrieves from; field resolutions
 land here pending review:
 
-![Knowledge Base — seed, manual, and feedback entries with a review queue](docs/images/knowledge.png)
+![Knowledge Base — seed, manual, and feedback entries with a review queue](docs/images/knowledge2.png)
