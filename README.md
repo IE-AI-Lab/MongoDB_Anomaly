@@ -261,4 +261,4 @@ new-anomaly toast:
 **Knowledge Base** — the RAG corpus the agent retrieves from; field resolutions
 land here pending review:
 
-![Knowledge Base — seed, manual, and feedback entries with a review queue](docs/images/knowledge2.png)
+![Knowledge Base — seed, manual, and feedback entries with a review queue](docs/images/knowledge3.png)
