@@ -247,7 +247,7 @@ auth (the dashboard currently has none).
 
 ---
 
-## Screenshots
+## Screenshots:
 
 **Dashboard** — live machine telemetry, field workers, recent alerts, and a
 new-anomaly toast:
