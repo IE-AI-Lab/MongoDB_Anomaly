@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+import redis
+
 from agent_worker import config, consumer
 
 
@@ -51,6 +54,42 @@ def test_next_batch_falls_through_to_medium_when_high_empty():
 
 def test_next_batch_empty_when_no_work():
     assert consumer._next_batch(_FakeRedis(), "g", "c", block_ms=10) == []
+
+
+# --- resilience: a reset wipes the streams; the worker must not die ----------
+
+class _ResponseErrorRedis:
+    """Raises a given ResponseError on xreadgroup; records group re-creation."""
+
+    def __init__(self, message: str):
+        self.message = message
+        self.groups_created: list[tuple[str, str]] = []
+
+    def xreadgroup(self, groupname, consumername, streams, count=1, block=None):
+        raise redis.exceptions.ResponseError(self.message)
+
+    def xgroup_create(self, name, groupname, id="0", mkstream=False):
+        self.groups_created.append((name, groupname))
+
+
+def test_next_batch_recovers_when_consumer_group_missing():
+    # A POST /queues/reset deletes the streams -> XREADGROUP raises NOGROUP.
+    # The worker must recreate the group and return [] instead of crashing.
+    fake = _ResponseErrorRedis(
+        "NOGROUP No such key 'anomaly:high' or consumer group 'agent-workers' "
+        "in XREADGROUP with GROUP option"
+    )
+    items = consumer._next_batch(fake, "agent-workers", "worker-1", block_ms=10)
+    assert items == []
+    # Consumer group recreated on the priority streams.
+    assert ("anomaly:high", "agent-workers") in fake.groups_created
+
+
+def test_next_batch_reraises_unexpected_response_error():
+    # Any other ResponseError is a real bug and must surface, not be swallowed.
+    fake = _ResponseErrorRedis("WRONGTYPE Operation against a key holding the wrong kind of value")
+    with pytest.raises(redis.exceptions.ResponseError):
+        consumer._next_batch(fake, "agent-workers", "worker-1", block_ms=10)
 
 
 # --- retry + DLQ ------------------------------------------------------------

@@ -10,7 +10,7 @@ import { usePolling } from "@/hooks/usePolling";
  * Simulation controls for the dashboard header. Polls /simulation/status so
  * Start/Stop and the Live pill reflect live state regardless of who changed it.
  */
-export function SimControls() {
+export function SimControls({ onReset }: { onReset?: () => void } = {}) {
   const status = usePolling(() => api.simStatus(), 5000);
   const running = status.data?.running ?? true;
   const [busy, setBusy] = useState<null | "start" | "stop" | "reset">(null);
@@ -30,6 +30,9 @@ export function SimControls() {
             return;
           }
           await api.simReset();
+          // The reset also wipes the Redis queues; let the dashboard's queue
+          // panel re-fetch right away rather than wait for its poll tick.
+          onReset?.();
         }
         status.refresh();
       } catch (e) {
@@ -38,7 +41,7 @@ export function SimControls() {
         setBusy(null);
       }
     },
-    [status]
+    [status, onReset]
   );
 
   const btn =

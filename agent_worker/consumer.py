@@ -177,6 +177,15 @@ def _next_batch(
             log.warning("redis connection error: %s — retrying in 2s", exc)
             time.sleep(2)
             return []
+        except redis.ResponseError as exc:
+            # A reset (POST /queues/reset or /simulation/reset) deletes the streams;
+            # XREADGROUP then raises NOGROUP. Recreate the group and continue instead
+            # of crashing the whole worker.
+            if "NOGROUP" in str(exc):
+                log.warning("consumer group missing (%s) — recreating and retrying", exc)
+                ensure_consumer_group(r)
+                return []
+            raise
         items = [(stream, mid, fields) for _s, msgs in (batches or []) for mid, fields in msgs]
         if items:
             return items
@@ -196,6 +205,12 @@ def _next_batch(
         log.warning("redis connection error: %s — retrying in 2s", exc)
         time.sleep(2)
         return []
+    except redis.ResponseError as exc:
+        if "NOGROUP" in str(exc):
+            log.warning("consumer group missing (%s) — recreating and retrying", exc)
+            ensure_consumer_group(r)
+            return []
+        raise
 
     items = [(s, mid, fields) for s, msgs in (batches or []) for mid, fields in msgs]
     items.sort(key=lambda item: rank.get(item[0], len(priority)))

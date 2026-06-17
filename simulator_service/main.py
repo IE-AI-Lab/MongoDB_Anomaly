@@ -35,8 +35,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--demo-interval-ticks",
         type=int,
-        default=60,
-        help="Tick interval for deterministic guaranteed anomaly injection",
+        default=24,
+        help="Tick interval for deterministic guaranteed anomaly injection "
+        "(24 ticks x 5s = one anomaly every 2 minutes)",
     )
     return p.parse_args()
 

@@ -16,8 +16,10 @@ const ROWS: { sev: SeverityType; label: string; dot: string }[] = [
   { sev: "low", label: "Low", dot: "bg-severity-lowInk" },
 ];
 
-export function QueuePanel() {
-  const q = usePolling(() => api.queueStatus(), 5000);
+export function QueuePanel({ resetSignal }: { resetSignal?: number } = {}) {
+  // resetSignal is a dep: when it changes (operator hit Reset) the hook
+  // re-fetches immediately, so the depths drop to 0 without a poll-tick lag.
+  const q = usePolling(() => api.queueStatus(), 5000, [resetSignal]);
   const data = q.data;
   const dlq = data?.dlq ?? 0;
 

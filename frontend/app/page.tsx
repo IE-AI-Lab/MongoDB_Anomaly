@@ -55,6 +55,9 @@ export default function DashboardPage() {
   // anomaly unresolved -> analyzed within seconds, often faster than the poll
   // interval, so keying only on "unresolved" would miss the toast entirely.
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  // Bumped when the operator hits Reset, so the independently-polled QueuePanel
+  // re-fetches immediately instead of waiting for its next 5s tick.
+  const [resetNonce, setResetNonce] = useState(0);
 
   useEffect(() => {
     if (loading) return; // wait for the first completed fetch before priming
@@ -122,7 +125,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-3">
           {loading && <Spinner />}
-          <SimControls />
+          <SimControls onReset={() => setResetNonce((n) => n + 1)} />
         </div>
       </div>
 
@@ -169,7 +172,7 @@ export default function DashboardPage() {
         {/* Right rail: field workers + agent queue depth, beside machines + alerts */}
         <div className="space-y-6">
           <WorkerPanel staff={staff} />
-          <QueuePanel />
+          <QueuePanel resetSignal={resetNonce} />
         </div>
       </div>
 

@@ -91,7 +91,7 @@ def run(
     prob_med: float = 0.002,
     prob_high: float = 0.001,
     deterministic_demo: bool = False,
-    demo_interval_ticks: int = 60,
+    demo_interval_ticks: int = 24,  # 24 ticks x 5s = one guaranteed anomaly every 2 min
 ) -> None:
     """
     Start the simulator loop.
