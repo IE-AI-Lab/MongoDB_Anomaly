@@ -5,7 +5,7 @@ IO). Mounted via api/__init__.py's `all_routers`.
 
 Why an endpoint (and not the worker writing Mongo directly)? The agent worker is
 a decoupled process that talks to the data layer over HTTP only (see
-docs/AGENT_TEAM_GUIDE.md §6.2). This is the write path for `agent_execution_logs`
+docs/AGENT_INTEGRATION_GUIDE.md §6.2). This is the write path for `agent_execution_logs`
 — the collection, indexes (`run_id` unique, `anomaly_id`+`started_at`) and the
 document contract already exist (scripts/init_db.py); this just exposes it.
 

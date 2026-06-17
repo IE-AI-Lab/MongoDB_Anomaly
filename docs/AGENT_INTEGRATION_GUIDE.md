@@ -109,7 +109,7 @@ are JSON with Mongo `_id` removed.
 2. `GET /sensors/{sensor_id}` → get `equipment_type`.
 3. `GET /sensors/{sensor_id}/readings` → recent trend.
 4. `GET /knowledge/search?q=<describe the fault>&equipment_type=<...>&error_codes=<error_code>&k=5` → grounding docs.
-5. Run your LLM reasoning (Groq).
+5. Run your LLM reasoning (DeepSeek / any OpenAI-compatible LLM).
 6. `PATCH /anomalies/{id}` with `description`, `recommended_solution`, `similar_cases`, `recommended_employee_id`, `agent_run_id`, `status:"analyzed"`.
 7. (Optional) `GET /staff_on_call?...` to pick the worker you recommend.
 
@@ -180,11 +180,15 @@ leaves the job **pending** for retry (it won't `XACK`). But avoid infinite
 poison-message loops: consider catching, writing an error note via `PATCH`, and
 acking after N attempts.
 
-### 6.5 Chat model = Groq, OpenAI-compatible
-Use `config.groq_api_key()` + `config.groq_base_url()` with the OpenAI SDK, or the
-`groq` SDK directly. Model: `llama-3.3-70b-versatile`. Add `groq` (or `openai`) to
-your deps. Watch the JSON-parsing typo from the reviewed script:
-`recommended_solution` (two m's) must match what you actually parse.
+### 6.5 Chat model = DeepSeek (OpenAI-compatible wire format)
+Configure the LLM via the env triple `LLM_BASE_URL` + `LLM_API_KEY` + `CHAT_MODEL`
+(see `agent_worker/config.py`: `llm_base_url()` / `llm_api_key()` / `chat_model()`;
+defaults `https://api.deepseek.com`, `deepseek-v4-flash`). Call it through the
+OpenAI SDK / `langchain_openai.ChatOpenAI` pointed at `LLM_BASE_URL` — "OpenAI"
+here is just the chat-completions **wire format** (a de-facto standard DeepSeek
+implements), not the vendor, so no request goes to OpenAI. Add `openai` (or
+`langchain-openai`) to your deps. Watch the JSON-parsing typo from the reviewed
+script: `recommended_solution` (two m's) must match what you actually parse.
 
 ### 6.6 RAG is semantic (the vector index is live)
 The `knowledge_vector` autoEmbed index is created and Active — `/knowledge/search`
