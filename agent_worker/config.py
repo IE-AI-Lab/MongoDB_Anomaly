@@ -69,34 +69,28 @@ def data_layer_base_url() -> str:
     return os.getenv("DATA_LAYER_BASE_URL", "http://localhost:8000").rstrip("/")
 
 
-# --- Chat / agent reasoning: any OpenAI-compatible provider -------------------
-# The investigation agent uses langchain_openai.ChatOpenAI, which talks to any
-# OpenAI-compatible endpoint (DeepSeek, Groq, OpenAI, ...). Configure the triple:
+# --- Chat / agent reasoning: DeepSeek (OpenAI-compatible endpoint) ------------
+# The investigation agent uses langchain_openai.ChatOpenAI — the generic client
+# for the OpenAI chat-completions *wire format*. It does NOT call OpenAI; DeepSeek
+# implements that same format, so the client points at LLM_BASE_URL. Configure:
 #   LLM_BASE_URL  - OpenAI-compatible base (default DeepSeek)
-#   LLM_API_KEY   - key for that provider (falls back to DEEPSEEK_API_KEY/GROQ_API_KEY)
-#   CHAT_MODEL    - model id for that provider
-# Default is DeepSeek because Groq's free tier (6k TPM) is too small for the
-# ~7k-token tool-calling requests; DeepSeek's limits/context handle them.
+#   LLM_API_KEY   - key for that provider (falls back to DEEPSEEK_API_KEY)
+#   CHAT_MODEL    - model id (default deepseek-v4-flash)
 
 
 def llm_api_key() -> str:
-    """API key for the OpenAI-compatible LLM provider. Empty ⇒ the graph skips
-    LLM reasoning and uses the deterministic fallback (worker still runs)."""
-    return (
-        os.getenv("LLM_API_KEY")
-        or os.getenv("DEEPSEEK_API_KEY")
-        or os.getenv("GROQ_API_KEY", "")
-    )
+    """API key for the DeepSeek (OpenAI-compatible) LLM provider. Empty ⇒ the
+    graph skips LLM reasoning and uses the deterministic fallback (worker runs)."""
+    return os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY", "")
 
 
 def llm_base_url() -> str:
-    """OpenAI-compatible base URL. Default DeepSeek; set LLM_BASE_URL to switch
-    providers (e.g. https://api.groq.com/openai/v1)."""
+    """OpenAI-compatible base URL (default DeepSeek; override via LLM_BASE_URL)."""
     return (os.getenv("LLM_BASE_URL") or "https://api.deepseek.com").rstrip("/")
 
 
 def chat_model() -> str:
-    return os.getenv("CHAT_MODEL", "deepseek-chat")
+    return os.getenv("CHAT_MODEL", "deepseek-v4-flash")
 
 
 def otel_enabled() -> bool:

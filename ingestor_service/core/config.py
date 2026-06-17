@@ -67,24 +67,9 @@ def voyage_embed_model() -> str:
     return os.getenv("VOYAGE_EMBED_MODEL", "voyage-4-lite")
 
 
-# --- Chat / agent reasoning: Groq (OpenAI-compatible endpoint) ----------------
-# The agent team points an OpenAI-SDK client at groq_base_url() with
-# groq_api_key() to use Groq's free Llama/Mixtral/Gemma models.
-
-
-def groq_api_key() -> str:
-    """Groq API key (OpenAI-compatible). Optional at startup."""
-    return os.getenv("GROQ_API_KEY", "")
-
-
-def groq_base_url() -> str:
-    """Groq's OpenAI-compatible base URL."""
-    return os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
-
-
-def chat_model() -> str:
-    """Chat model used by the agent team's reasoning layer."""
-    return os.getenv("CHAT_MODEL", "llama-3.3-70b-versatile")
+# Chat / agent-reasoning config lives in agent_worker/config.py — the worker is a
+# separate process and is the only thing that talks to the LLM. The data layer
+# does no LLM calls, so it holds no chat config.
 
 
 # --- Agent dispatch: stub (stdout) or Redis Streams queue -------------------

@@ -1,4 +1,4 @@
-"""Tests for investigation agent helpers (no live Groq / LangGraph compile)."""
+"""Tests for investigation agent helpers (no live LLM / LangGraph compile)."""
 
 from __future__ import annotations
 

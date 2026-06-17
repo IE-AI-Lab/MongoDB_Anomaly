@@ -78,9 +78,8 @@ def _build_agent_app():
     except ImportError:
         return None
 
-    # OpenAI-compatible client so any provider works via LLM_BASE_URL (DeepSeek by
-    # default; Groq/OpenAI/etc. by overriding the env). max_retries handles
-    # transient rate-limits with backoff.
+    # OpenAI-compatible client pointed at DeepSeek by default (override via
+    # LLM_BASE_URL). max_retries handles transient rate-limits with backoff.
     llm = ChatOpenAI(
         model=config.chat_model(),
         temperature=0,
@@ -115,12 +114,12 @@ def _fallback_decision(anomaly: dict[str, Any]) -> dict[str, Any]:
             f"against limit {limit}."
         ),
         "recommended_solution": (
-            "Review the anomaly manually or configure GROQ_API_KEY so the "
+            "Review the anomaly manually or configure LLM_API_KEY so the "
             "investigation agent can call RAG and staff tools."
         ),
         "recommended_employee_id": None,
         "similar_cases": [],
-        "reasoning": "GROQ_API_KEY or LangChain/Groq dependencies are not configured; agent did not run.",
+        "reasoning": "LLM_API_KEY or LangChain dependencies are not configured; agent did not run.",
     }
 
 
@@ -183,11 +182,11 @@ Return final JSON only.
                 },
             },
         )
-    except Exception as exc:  # noqa: BLE001 — Groq/network errors should not fail the job
+    except Exception as exc:  # noqa: BLE001 — LLM/network errors should not fail the job
         fallback = _fallback_decision(anomaly)
         fallback["reasoning"] = f"Investigation agent failed: {exc}"
         # The key IS configured here (agent_app was built), so don't blame it —
-        # this path is a Groq rate-limit (429) / network / recursion error.
+        # this path is an LLM rate-limit (429) / network / recursion error.
         fallback["recommended_solution"] = (
             "Automated investigation could not complete (LLM rate-limit or error). "
             "Review the anomaly manually; see the agent worker logs for details."

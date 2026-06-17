@@ -24,7 +24,7 @@ ingestor_service/
   app.py            FastAPI app — loads env, mounts api/all_routers, startup hooks
   models.py         Shared Pydantic schema (telemetry ingestion contract)
   core/             Infrastructure
-    config.py         Env accessors (Mongo, Voyage model, Groq, Redis)
+    config.py         Env accessors (Mongo, Voyage model, Redis, OTEL, dispatch)
     db.py             Sync PyMongo client + col() helper + index setup
   api/              HTTP routers (thin — parse, validate, delegate)
     __init__.py       all_routers (ordered; see note below)
