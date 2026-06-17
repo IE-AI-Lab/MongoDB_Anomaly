@@ -19,12 +19,14 @@ if (-not (Test-Path $py)) {
 function Stop-Stack {
   # taskkill /T kills the whole tree, so uvicorn's --reload worker (whose command
   # line doesn't match the regex) dies with its reloader parent.
+  # Let cmd do the redirection so a "process not found" race (the PID died as a
+  # child of one already killed) can't surface as a PowerShell NativeCommandError.
   Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
     Where-Object { $_.CommandLine -match "ingestor_service|agent_worker|simulator_service|uvicorn" } |
-    ForEach-Object { & taskkill /PID $_.ProcessId /T /F *> $null }
+    ForEach-Object { cmd /c "taskkill /PID $($_.ProcessId) /T /F >nul 2>nul" }
   Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
     Where-Object { $_.CommandLine -match "next-server|next dev" } |
-    ForEach-Object { & taskkill /PID $_.ProcessId /T /F *> $null }
+    ForEach-Object { cmd /c "taskkill /PID $($_.ProcessId) /T /F >nul 2>nul" }
 }
 
 Write-Host "Clearing any existing stack instances..." -ForegroundColor Cyan
@@ -59,7 +61,7 @@ try {
 finally {
   Write-Host "`nStopping all services..." -ForegroundColor Cyan
   foreach ($p in $procs) {
-    try { & taskkill /PID $p.Id /T /F *> $null } catch {}
+    cmd /c "taskkill /PID $($p.Id) /T /F >nul 2>nul"
   }
   Stop-Stack
   Write-Host "All stopped." -ForegroundColor Cyan
