@@ -1,12 +1,24 @@
-# MongoDB Atlas Anomaly Detection — Data Layer
+# MongoDB Atlas Anomaly Detection — Platform
 
-Backend substrate for an event-driven anomaly-detection agent. Telemetry flows
-in, anomalies are detected and persisted, and an **HTTP API** exposes everything
-an agent (LangGraph or otherwise) needs to read context and write back its
-analysis, assignment, and resolution — closing a RAG feedback loop.
+End-to-end platform for an event-driven industrial **anomaly-detection** system.
+Telemetry flows in, anomalies are detected and persisted, an **HTTP API** exposes
+everything a reasoning agent needs, a **LangGraph agent** investigates each
+anomaly and writes back its analysis/assignment, and a **Next.js operator
+dashboard** drives the whole thing — closing a RAG feedback loop.
 
-This repo is the **data layer**. The reasoning agent is built *on top* of this
-API by the agent team — it lives elsewhere and is not in this repo.
+Everything integrates over the **HTTP API**; nothing imports another service's
+internals across process boundaries. The repo contains five moving parts:
+
+| Part | What it is | Run |
+|------|------------|-----|
+| `ingestor_service` | FastAPI **data layer** + HTTP API + detector | `uvicorn ingestor_service.app:app --port 8000` |
+| `agent_worker` | LangGraph **reasoning agent** (consumes Redis jobs) | `python -m agent_worker.main` |
+| `simulator_service` | Telemetry/fault **generator** | `python -m simulator_service.main` |
+| `frontend/` | Next.js **operator dashboard** (HTTP-API consumer) | `cd frontend && npm run dev` |
+| `monitoring/` | Optional OTEL → Prometheus → Grafana | `docker compose -f monitoring/docker-compose.observability.yml up` |
+
+Plus two stores: **MongoDB Atlas** (system of record + vector search) and
+**Redis** (the ingestor→agent job stream).
 
 ---
 
@@ -24,9 +36,11 @@ API by the agent team — it lives elsewhere and is not in this repo.
                                    └ core/ (config, db)        ├ agent_execution_logs
                                                                └ session_events
         agent_worker ──XREADGROUP──▶ Redis (anomaly:high → :medium → :low, DLQ :dlq)
-              │
-              └──HTTP──▶ read/write API ──▶ MongoDB Atlas
-              └──chat──▶ Groq (LangGraph — wire in agent_worker/consumer.py)
+              │  (LangGraph ReAct: gather context → investigate → PATCH back)
+              ├──HTTP──▶ read/write API ──▶ MongoDB Atlas
+              └──chat──▶ DeepSeek (any OpenAI-compatible LLM; see Providers)
+
+        frontend/ (Next.js) ──HTTP /backend/*──▶ ingestor_service API
 ```
 
 Providers:
@@ -34,11 +48,17 @@ Providers:
 | Use | Provider | Model | Notes |
 |-----|----------|-------|-------|
 | **Embeddings** | Atlas Vector Search (Voyage AI) | `voyage-4-lite` | Automated Embedding — Atlas embeds `text_content` at index + query time; no key, no vectors stored |
-| **Chat / reasoning** | Groq | `llama-3.3-70b-versatile` | OpenAI-compatible endpoint |
+| **Chat / reasoning** | Any OpenAI-compatible endpoint (**default DeepSeek**) | `deepseek-chat` | Configured by `LLM_BASE_URL` + `LLM_API_KEY` + `CHAT_MODEL` (`agent_worker/config.py`) |
 
 > Embeddings are a database concern: we store only `text_content` and Atlas
-> generates the vector via the `knowledge_vector` autoEmbed index. The chat
-> provider (Groq) is configured independently (see `.env.example`).
+> generates the vector via the `knowledge_vector` autoEmbed index.
+>
+> The chat provider is configured independently (see `.env.example`). DeepSeek is
+> the default because the ReAct agent makes several ~7k-token tool-calling
+> requests per anomaly and Groq's free tier (6k TPM) is too small. To use Groq
+> instead: `LLM_BASE_URL=https://api.groq.com/openai/v1`, a paid Groq key, and
+> `CHAT_MODEL=llama-3.3-70b-versatile`. With **no key**, the agent falls back to a
+> deterministic (non-LLM) decision so the worker still runs.
 
 ---
 
@@ -56,10 +76,19 @@ DB_NAME="anomaly_db"
 # Must match the model set in the knowledge_vector autoEmbed index.
 VOYAGE_EMBED_MODEL=voyage-4-lite
 
-# Chat (https://console.groq.com/keys)
-GROQ_API_KEY=...
-GROQ_BASE_URL=https://api.groq.com/openai/v1
-CHAT_MODEL=llama-3.3-70b-versatile
+# Chat / agent reasoning — any OpenAI-compatible provider (default DeepSeek).
+# Get a key at https://platform.deepseek.com/api_keys
+LLM_BASE_URL=https://api.deepseek.com
+LLM_API_KEY=...
+CHAT_MODEL=deepseek-chat
+
+# Queue dispatch: "redis" routes anomalies to the agent worker; "stub" logs to stdout.
+AGENT_DISPATCH=redis
+REDIS_URL=redis://127.0.0.1:6379/0
+
+# Optional: enable the two extra detectors (off by default — see Anomaly detection)
+# ANOMALY_ROC_ENABLED=true
+# ANOMALY_STAT_ENABLED=true
 ```
 
 `.env` is gitignored — never commit real keys.
@@ -106,24 +135,29 @@ enabled — supported on M0/Flex and dedicated tiers.
 ### 5. Run
 
 Set `AGENT_DISPATCH=redis` in `.env` when using the queue (default is `stub`).
+Redis must be reachable on `REDIS_URL` — e.g. `docker run -d -p 6379:6379 redis`.
 
-**One command (redis + api + agent + simulator):**
+**One command — the whole stack (redis + api + agent + simulator + frontend):**
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-./scripts/dev_up.sh
-# or: honcho start
+
+# Windows (native orchestrator — honcho's bash procs resolve to WSL here):
+powershell -ExecutionPolicy Bypass -File scripts\dev_up.ps1
+
+# macOS / Linux:
+./scripts/dev_up.sh            # wraps `honcho start`
 ```
 
-Honcho starts Redis if it is not already running on `REDIS_URL` (default `:6379`).
-The simulator waits for `GET /health` before sending telemetry.
-Subset: `honcho start api agent` (no simulator; start Redis yourself or include `redis`).
+Both launch the API (`:8000`), agent worker, simulator, and Next.js frontend
+(`:3000`), and stop everything on Ctrl+C. Subset on Unix:
+`honcho start api agent` (no simulator/web).
 
 **Or separate terminals:**
 
 ```bash
 # Redis (if not already running)
-redis-server
+docker run -d -p 6379:6379 redis
 
 # API
 uvicorn ingestor_service.app:app --reload --host 0.0.0.0 --port 8000
@@ -131,8 +165,12 @@ uvicorn ingestor_service.app:app --reload --host 0.0.0.0 --port 8000
 # Agent worker — blocks on Redis up to 20s per read
 python -m agent_worker.main
 
-# Simulator — guaranteed anomaly every 10 ticks for demos:
-python -m simulator_service.main --base-url http://localhost:8000 --deterministic-demo
+# Simulator — deterministic-demo forces a guaranteed anomaly every
+# --demo-interval-ticks (default 24 ticks x 5s = one every 2 minutes):
+python -m simulator_service.main --base-url http://127.0.0.1:8000 --deterministic-demo
+
+# Frontend (operator dashboard)
+cd frontend && npm install && npm run dev
 ```
 
 When an anomaly is detected, the ingestor **XADD**s `{ anomaly_id, ... }` to a
@@ -259,6 +297,36 @@ detector-specific stats under `trigger_value` (e.g. `pct_change`, `z_score`).
 
 ---
 
+## Agent worker (LangGraph investigation)
+
+`agent_worker/` is the reasoning agent — a separate process that consumes anomaly
+jobs from Redis and writes its analysis back over the HTTP API (it imports
+nothing from `ingestor_service`). Per anomaly:
+
+1. **Consume** — `consumer.py` drains the per-severity streams in priority order
+   (high → medium → low), at-least-once (XACK on success). A failed job is
+   requeued with an incremented `attempts`; after `ANOMALY_MAX_RETRIES` (default
+   3) it is dead-lettered to `anomaly:dlq`. A reset that wipes the streams is
+   survived (the consumer group is recreated, not crashed).
+2. **Investigate** — `anomaly_graph.py` (LangGraph) gathers context, then a ReAct
+   agent (`investigation_agent.py`) calls tools (`agent_tools.py`) over the API:
+   `query_rag_knowledge_base`, `get_staff_contact`, `get_sensor_readings`,
+   `retrieve_recent_alerts`, `retrieve_machine_memory`. A retrieved escalation
+   rule ("if temp is high, contact X") takes precedence over generic advice.
+3. **Parse** — `decision_parser.py` recovers the decision JSON from the LLM's
+   (often prose-wrapped) final message; `similar_cases` always come from the real
+   RAG tool output, never the model's invention. No key / repeated LLM error → a
+   deterministic fallback decision, so the worker always produces a result.
+4. **Write back** — PATCHes the anomaly to `analyzed` (description, recommended
+   solution, recommended employee, similar cases) and best-effort writes a trace
+   to `agent_execution_logs`.
+
+Each anomaly takes ~25–35s (several sequential LLM tool-calls), processed one at
+a time. Tune via env: `CHAT_MODEL`, `ANOMALY_MAX_RETRIES`,
+`AGENT_CONSUMER_BLOCK_MS`, `ANOMALY_STREAM_PREFIX`.
+
+---
+
 ## Frontend (operator dashboard)
 
 A MongoDB Atlas–styled Next.js console lives in [`frontend/`](frontend/) — an
@@ -355,6 +423,7 @@ approves it — a guardrail against poisoning RAG with bad field notes.
 
 | Method | Path | Body | Effect |
 |--------|------|------|--------|
+| `GET`  | `/queues/status` | — | per-severity Redis stream depths + DLQ count (`{available, streams:{high,medium,low}, dlq}`); fail-open to `available:false` when dispatch isn't redis. Backs the dashboard's Agent Queue panel. |
 | `POST` | `/queues/reset` | — | wipes Redis anomaly streams only (`anomaly:high|medium|low`, `anomaly:dlq`); Mongo untouched. Use before a monitoring run for fresh Grafana `len`/`pending` counters. |
 | `POST` | `/simulation/reset` | `{purge_feedback_knowledge?: false}` | full demo reset: purges anomalies, telemetry, agent logs, session events; restores all staff to on-call; clears in-memory detector debounce state; wipes the per-severity Redis streams + DLQ; seed data untouched. Restart the simulator to reset its sequence counters. |
 | `GET`  | `/simulation/status` | — | `{running}` — simulator polls this each tick (fail-open to running) |
@@ -399,10 +468,12 @@ curl "localhost:8000/staff_on_call?is_on_call=true&specialization=vibration"
 }
 ```
 
-`metric_type` ∈ `environment | vibration | pressure | flow`. Detector error
-codes: `TEMP_HIGH`, `TEMP_LOW`, `HUMIDITY_HIGH`, `VIBRATION_HIGH`,
-`PRESSURE_LOW`, `FLOW_LOW`. These are the join keys into
-`knowledge_base.associated_error_codes`.
+`metric_type` ∈ `environment | vibration | pressure | flow`; metric values go
+under `reading.data` (e.g. `{"amplitude_mm": 0.7}`). Threshold error codes:
+`TEMP_HIGH`, `TEMP_LOW`, `HUMIDITY_HIGH`, `VIBRATION_HIGH`, `PRESSURE_LOW`,
+`FLOW_LOW`; the rate-of-change / statistical detectors add `{METRIC}_RAPID_RISE`,
+`{METRIC}_RAPID_DROP`, `{METRIC}_OUTLIER` (see **Anomaly detection**). These error
+codes are the join keys into `knowledge_base.associated_error_codes`.
 
 ---
 
@@ -416,7 +487,7 @@ codes: `TEMP_HIGH`, `TEMP_LOW`, `HUMIDITY_HIGH`, `VIBRATION_HIGH`,
 | `staff_on_call` | On-call roster, by `specialization` / `handled_severity_type` / `escalation_rank` |
 | `knowledge_base` | RAG corpus (`text_content`; Atlas autoEmbed generates the vector). `is_active=false` = awaiting curation |
 | `system_metadata` | Config-as-data: thresholds + severity bands |
-| `agent_execution_logs` | Agent run traces (the agent team populates these) |
+| `agent_execution_logs` | Agent run traces (written by `agent_worker`, upsert by `run_id`) |
 | `session_events` | High-signal event stream |
 
 Full field contracts are documented inline in [scripts/init_db.py](scripts/init_db.py).
@@ -425,21 +496,28 @@ Full field contracts are documented inline in [scripts/init_db.py](scripts/init_
 
 ## RAG retrieval
 
-`ingestor_service/rag.py`:
+`ingestor_service/services/rag.py` —
+`search_knowledge(query, *, equipment_type=None, error_codes=None, k=5)` is
+**hybrid**: it merges two passes and de-dupes by `document_id`:
 
-- `search_knowledge(query, *, equipment_type=None, error_codes=None, k=5)` —
-  Atlas `$vectorSearch` with **automated query embedding** (passes the raw query
-  text + model; Atlas embeds it), pre-filtered to `is_active=True` (+ optional
-  `equipment_type` / `error_codes`). **Falls back to a filtered recency sort**
-  when the `knowledge_vector` index is not Active yet or returns empty.
+- **Vector** — Atlas `$vectorSearch` with **automated query embedding** (passes
+  the raw query text + model; Atlas embeds it), pre-filtered to `is_active=True`
+  (+ optional `equipment_type` / `error_codes`).
+- **Keyword** — a lexical regex pass over `text_content` / `section_title`,
+  filtered only by `is_active`, so manually added rules (which often lack
+  `equipment_type`/`error_codes`) and not-yet-indexed docs are still found.
 
-No `embed()` helper — the service never computes a vector.
+If both come back empty it **falls back to a filtered recency sort** (e.g. the
+`knowledge_vector` index isn't Active yet). The service never computes or stores
+a vector — Atlas owns the embeddings (it materializes them into an internal
+`_mdb_internal_search` collection; `knowledge_base` stays text-only).
 
 **Closed loop:** resolving an anomaly with `outcome="fixed"` writes the
 resolution notes back into `knowledge_base` as `is_active=false`,
 `curation_status="pending"`. A human curator approves it via
-`POST /knowledge/{document_id}/activate` (see **Curation** above) before it
-influences retrieval — a guardrail against poisoning RAG with bad notes.
+`PATCH /knowledge/{document_id}` with `{"is_active": true}` (see **Knowledge
+curation** above) before it influences retrieval — a guardrail against poisoning
+RAG with bad notes.
 
 ### Migrations
 
@@ -449,20 +527,26 @@ influences retrieval — a guardrail against poisoning RAG with bad notes.
 
 ---
 
-## Using Groq chat from the agent
+## LLM provider (chat / agent reasoning)
 
-The chat model is OpenAI-compatible, so point the OpenAI SDK at Groq:
+The agent talks to any **OpenAI-compatible** endpoint via
+`langchain_openai.ChatOpenAI` (built with `max_retries=5`), configured by the env
+triple in `agent_worker/config.py`:
 
-```python
-from openai import OpenAI
-from ingestor_service.core import config
+| Env | `agent_worker.config` getter | Default |
+|-----|------------------------------|---------|
+| `LLM_BASE_URL` | `llm_base_url()` | `https://api.deepseek.com` |
+| `LLM_API_KEY`  | `llm_api_key()` (falls back to `DEEPSEEK_API_KEY` / `GROQ_API_KEY`) | — |
+| `CHAT_MODEL`   | `chat_model()` | `deepseek-chat` |
 
-client = OpenAI(api_key=config.groq_api_key(), base_url=config.groq_base_url())
-resp = client.chat.completions.create(
-    model=config.chat_model(),
-    messages=[{"role": "user", "content": "..."}],
-)
-```
+Switch providers by changing the env only — e.g. Groq:
+`LLM_BASE_URL=https://api.groq.com/openai/v1`, a paid Groq key,
+`CHAT_MODEL=llama-3.3-70b-versatile`. With **no key**, the investigation node
+skips the LLM and returns a deterministic fallback decision.
+
+> History: the chat client was once `langchain_groq.ChatGroq`; it was switched to
+> the OpenAI-compatible client so DeepSeek/others work. The ingestor's old
+> `groq_*` config getters are vestigial.
 
 ---
 
@@ -490,32 +574,43 @@ by `anomaly_id`, and inspect the trace to see ReAct tool spans (`query_rag_knowl
 ```
 scripts/
   init_db.py                Idempotent DB setup + seed (run once)
-  knowledge_seed.py         14-entry knowledge corpus
+  knowledge_seed.py         Seed knowledge corpus
+  dev_up.sh / dev_up.ps1    One-command whole-stack launchers (Unix / Windows)
 ingestor_service/           Data layer (run: uvicorn ingestor_service.app:app)
   app.py                    FastAPI app; mounts api/all_routers + startup hooks
   models.py                 Telemetry ingestion Pydantic contract
+  observability.py          Env-gated OTEL setup for the API
   core/
-    config.py               Env accessors (Mongo, Voyage model, Groq, Redis)
+    config.py               Env accessors (Mongo, Voyage model, Redis, OTEL, dispatch, queue routing)
     db.py                   Sync PyMongo client + col() helper + indexes
   api/                      Thin HTTP routers
     telemetry.py            POST /ingest/telemetry, GET /health
-    read.py                 GET endpoints (agent reads)
-    write.py                PATCH/POST endpoints (agent/manager/staff writes)
+    read.py                 GET endpoints (anomalies, sensors, system_metadata, staff, knowledge/search)
+    write.py                PATCH/POST anomaly endpoints (analyze/assign/resolve)
     knowledge.py            knowledge_base CRUD + curation review queue
     agent_logs.py           POST/GET /agent_logs (agent run traces)
-    admin.py                POST /simulation/reset (demo state purge)
+    admin.py                simulation start/stop/status/reset + queues status/reset
   services/                 Domain logic (no HTTP)
     ingest.py               Persist telemetry
-    rag.py                  search_knowledge() (Atlas autoEmbed)
+    rag.py                  search_knowledge() — hybrid vector + keyword (Atlas autoEmbed)
     feedback_to_knowledge.py  Closed RAG loop
     severity_engine.py      breach_ratio → severity_level / severity_type
+    simulation_control.py   Run/pause flag (system_metadata) read/write + canonical shape
   messaging/
-    queue.py                XADD anomaly jobs to Redis Streams
+    queue.py                Severity-routed Redis streams (XADD/reset/status) + DLQ
     agent_stub.py           stdout stub when AGENT_DISPATCH=stub
-  detector/                 Thresholds, severity, state, detection
-agent_worker/               Redis consumer (python -m agent_worker.main)
-  consumer.py               XREADGROUP loop + process_anomaly_job hook
-simulator_service/          Telemetry generator
+  detector/                 thresholds, state (rolling windows), detect (3 detectors)
+agent_worker/               LangGraph reasoning agent (python -m agent_worker.main)
+  main.py                   Entrypoint: load env → langsmith → otel → run_consumer
+  consumer.py               Priority drain + retry/DLQ; recreates group on reset
+  anomaly_graph.py          LangGraph: gather context → investigate → PATCH back
+  investigation_agent.py    ReAct agent + deterministic fallback decision
+  decision_parser.py        Recover decision JSON from messy LLM output
+  agent_tools.py            Tool fns the agent calls over the HTTP API
+  config.py / observability.py  LLM/Redis/OTEL env getters; LangSmith + OTEL
+simulator_service/          Telemetry + fault generator (polls /simulation/status)
+frontend/                   Next.js operator dashboard (see frontend/README.md)
+monitoring/                 OTEL Collector → Prometheus → Grafana (optional)
 ```
 
 ---
@@ -535,8 +630,13 @@ simulator_service/          Telemetry generator
 
 ## Status
 
-Implemented & live-tested: DB setup, telemetry ingest, detection, severity,
-RAG (embed + search + closed loop), full read/write API.
+Implemented & live-tested end-to-end: DB setup; telemetry ingest; the
+three-detector pipeline (threshold + rate-of-change + statistical) with severity
+and debounce; hybrid RAG (vector + keyword) with the closed feedback loop; the
+full read/write/admin HTTP API; severity-routed Redis queue with retry + DLQ; the
+LangGraph agent worker (DeepSeek, with deterministic fallback); the Next.js
+operator dashboard; and the optional OTEL → Prometheus → Grafana monitoring stack.
 
-Roadmap (quality, non-blocking): richer simulator curves (noise/drift/excursion)
-and detector debounce to suppress duplicate anomalies within a window.
+Roadmap (non-blocking): a WebSocket `/ws` + Redis-pub/sub EventBus to replace the
+dashboard's polling; a stateless `POST /chat`; email alerts on
+creation/`analyzed`; and real auth (the dashboard currently has none).
