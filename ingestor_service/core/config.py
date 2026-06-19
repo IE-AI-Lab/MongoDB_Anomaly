@@ -82,9 +82,31 @@ def groq_base_url() -> str:
     return os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 
 
+def llm_api_key() -> str:
+    """API key for the OpenAI-compatible LLM provider.
+
+    Supports common env names for Gemini/OpenAI-compatible providers.
+    """
+    return (
+        os.getenv("LLM_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
+        or os.getenv("DEEPSEEK_API_KEY")
+        or os.getenv("GROQ_API_KEY", "")
+    )
+
+
+def llm_base_url() -> str:
+    """OpenAI-compatible base URL for the chatbot provider."""
+    return (
+        os.getenv("LLM_BASE_URL")
+        or os.getenv("OPENAI_API_BASE_URL")
+        or "https://api.openai.com/v1"
+    ).rstrip("/")
+
+
 def chat_model() -> str:
-    """Chat model used by the agent team's reasoning layer."""
-    return os.getenv("CHAT_MODEL", "llama-3.3-70b-versatile")
+    """Chat model used by the ingestor service chatbot."""
+    return os.getenv("CHAT_MODEL", "gemini-2.5-flash")
 
 
 # --- Agent dispatch: stub (stdout) or Redis Streams queue -------------------

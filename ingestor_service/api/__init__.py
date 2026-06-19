@@ -8,12 +8,13 @@ it. Keep `read` before `knowledge`.
 """
 from __future__ import annotations
 
-from . import admin, agent_logs, knowledge, read, telemetry, write
+from . import admin, agent_logs, chat, knowledge, read, telemetry, write
 
 all_routers = [
     telemetry.router,
     read.router,
     write.router,
+    chat.router,
     agent_logs.router,
     knowledge.router,  # after read: /knowledge/{id} must not shadow /knowledge/search
     admin.router,

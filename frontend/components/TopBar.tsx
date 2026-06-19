@@ -8,6 +8,7 @@ import { MongoLeaf } from "./Logo";
 
 const NAV = [
   { href: "/", label: "Dashboard" },
+  { href: "/chat", label: "Chatbot" },
   { href: "/feedback", label: "Feedback" },
   { href: "/knowledge", label: "Knowledge Base" },
 ];

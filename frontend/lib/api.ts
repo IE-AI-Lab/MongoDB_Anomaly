@@ -5,6 +5,8 @@ import type {
   AgentLog,
   Anomaly,
   AnomalyStatus,
+  ChatMessage,
+  ChatResponse,
   KnowledgeDoc,
   KnowledgeSource,
   MetricType,
@@ -118,6 +120,12 @@ export const api = {
   deleteKnowledge: (id: string) =>
     request<{ deleted: boolean }>(`/knowledge/${encodeURIComponent(id)}`, {
       method: "DELETE",
+    }),
+
+  chat: (body: { messages: ChatMessage[]; equipment_type?: string; error_codes?: string[]; k?: number }) =>
+    request<ChatResponse>(`/chat`, {
+      method: "POST",
+      json: body,
     }),
 
   // --- queue / pipeline ---

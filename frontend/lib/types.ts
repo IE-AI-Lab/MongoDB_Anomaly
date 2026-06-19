@@ -155,6 +155,18 @@ export interface SimStatus {
   running: boolean;
 }
 
+export interface ChatMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+
+export interface ChatResponse {
+  query: string;
+  answer: string;
+  model: string;
+  sources: KnowledgeDoc[];
+}
+
 // GET /queues/status — per-severity Redis stream depths + dead-letter count.
 export interface QueueStatus {
   available: boolean;
