@@ -1,122 +1,197 @@
 """
-Telemetry generators.
+Telemetry generators — a ball-mill signal model.
 
-Each generator returns a tuple:
-- reading_data: dict of metric fields specific to the sensor type
-- quality: "good" | "suspect" | "bad"
+Each sensor stream carries a *continuous* signal rather than independent random
+draws, so the dashboard shows realistic, autocorrelated telemetry that trends,
+oscillates, and occasionally spikes — like a real ball mill being monitored.
 
-Fault injection:
-- For demo repeatability, we use a simple "fault mode" per metric type:
-  - None: normal operation
-  - "low": small threshold breach
-  - "medium": medium breach
-  - "high": large breach (rare)
+The value of the primary (alarm-bearing) metric each tick is:
+
+    value = baseline
+          + seasonal      # slow sine — mill load / thermal cycle
+          + ar1_noise      # smooth, autocorrelated measurement noise
+          + sign * (wear + sub_threshold_spike)
+
+where `sign` is +1 for "above" alarms (temperature, vibration) and -1 for
+"below" alarms (lube pressure, coolant flow), so degradation always pushes the
+value toward its limit.
+
+Three anomaly-shaping behaviours, all driven by the per-machine `stress` slider
+(0 = healthy/flat, 1 = steep climb) and the run-mode the runner assigns:
+
+- **Gradual degradation**: in NORMAL mode `wear` accumulates each tick at a rate
+  set by `stress`. With noise the exact crossing tick is random, but the
+  steepness/frequency is the slider — bearing wear, liner wear, scaling.
+- **Sudden step-fault**: an occasional instantaneous jump of `wear` clear over
+  the limit (e.g. a lube-pump trip), injected by the runner via `inject_step`.
+- **Sub-threshold texture**: frequent small spikes that stay *under* the limit on
+  a healthy machine (ball impacts, cataracting charge) — realism, not anomalies.
+
+Once the value crosses the limit the detector fires and the runner switches the
+sensor to HOLD (breach is sustained), then to RECOVER once a worker resolves the
+anomaly (`wear` decays back to baseline). The signal only decreases after the
+worker says it's done.
+
+Realistic baselines/limits (mirror the seeded thresholds in scripts/init_db.py):
+- trunnion bearing temp ~50 C, alarm 70 C
+- drivetrain vibration ~2.5 mm/s RMS, alarm 7.1 mm/s (ISO 10816)
+- lube-oil pressure ~6.5 bar, min 4.5 bar
+- coolant flow ~18 L/min, min 12 L/min
 """
 
 from __future__ import annotations
 
+import math
 import random
+from dataclasses import dataclass
 from typing import Any, Literal
 
-
-FaultMode = Literal["low", "medium", "high"]
 Quality = Literal["good", "suspect", "bad"]
+Mode = Literal["normal", "hold", "recover"]
 
 
-def _noise(scale: float) -> float:
-    """Uniform noise helper."""
-    return random.uniform(-scale, scale)
+@dataclass
+class MetricProfile:
+    """Signal parameters for a metric_type's primary (alarm-bearing) metric."""
+
+    field: str
+    direction: Literal["above", "below"]
+    baseline: float
+    limit: float
+    season_amp: float
+    season_period_s: float
+    noise_sigma: float
+    noise_rho: float          # AR(1) coefficient; high = slow/smooth (thermal inertia)
+    spike_prob: float         # per-tick chance of a sub-threshold texture spike
+    decimals: int
+    floor: float = 0.0        # physical lower clamp (values can't go negative)
+
+    @property
+    def margin(self) -> float:
+        """Distance from baseline to the alarm limit (always positive)."""
+        return abs(self.limit - self.baseline)
+
+    @property
+    def sign(self) -> int:
+        """+1 if breaching means going up, -1 if breaching means going down."""
+        return 1 if self.direction == "above" else -1
 
 
-def generate_environment(fault: FaultMode | None = None) -> tuple[dict[str, Any], Quality]:
+# Keyed by metric_type. Only the primary metric degrades; secondary metrics
+# (humidity, frequency) are benign context generated in `_secondary`.
+PROFILES: dict[str, MetricProfile] = {
+    "environment": MetricProfile(
+        field="temp_celsius", direction="above", baseline=50.0, limit=70.0,
+        season_amp=2.0, season_period_s=200.0,
+        noise_sigma=0.35, noise_rho=0.92, spike_prob=0.04, decimals=2,
+    ),
+    "vibration": MetricProfile(
+        field="amplitude_mm", direction="above", baseline=2.5, limit=7.1,
+        season_amp=0.45, season_period_s=120.0,
+        noise_sigma=0.18, noise_rho=0.55, spike_prob=0.15, decimals=3,
+    ),
+    "pressure": MetricProfile(
+        field="pressure_bar", direction="below", baseline=6.5, limit=4.5,
+        season_amp=0.22, season_period_s=160.0,
+        noise_sigma=0.10, noise_rho=0.70, spike_prob=0.05, decimals=2,
+    ),
+    "flow": MetricProfile(
+        field="flow_rate_lpm", direction="below", baseline=18.0, limit=12.0,
+        season_amp=1.1, season_period_s=150.0,
+        noise_sigma=0.45, noise_rho=0.70, spike_prob=0.05, decimals=2,
+    ),
+}
+
+# Tuning knobs (per tick).
+_WEAR_FRACTION = 0.06     # at stress=1, wear gains ~6% of margin/tick → crosses in ~17 ticks
+_HOLD_OVERSHOOT = (1.10, 1.45)   # wear (× margin) held during an active anomaly
+_STEP_OVERSHOOT = (1.05, 1.40)   # wear (× margin) on a sudden step-fault
+_RECOVER_DECAY = 0.55     # wear multiplier each tick while recovering
+_RECOVERED_FRACTION = 0.05  # wear <= margin * this → fully recovered
+_SPIKE_RANGE = (0.20, 0.60)  # texture spike size as a fraction of margin
+
+
+@dataclass
+class SignalState:
+    """Mutable per-sensor signal state (carried across ticks by the runner)."""
+
+    wear: float = 0.0
+    noise: float = 0.0
+    phase: float = 0.0   # per-sensor seasonal offset so machines aren't in lockstep
+
+    @classmethod
+    def new(cls, period_s: float) -> "SignalState":
+        return cls(phase=random.uniform(0.0, period_s))
+
+
+def recovered(metric_type: str, st: SignalState) -> bool:
+    """True once a recovering signal has decayed back to its baseline."""
+    return st.wear <= PROFILES[metric_type].margin * _RECOVERED_FRACTION
+
+
+def _primary_value(
+    profile: MetricProfile,
+    st: SignalState,
+    *,
+    stress: float,
+    mode: Mode,
+    t_seconds: float,
+    inject_step: bool,
+) -> float:
+    """Advance the primary metric one tick and return its value (mutates `st`)."""
+    margin = profile.margin
+
+    # AR(1) noise: smooth, autocorrelated wandering instead of white jitter.
+    st.noise = profile.noise_rho * st.noise + random.gauss(0.0, profile.noise_sigma)
+    season = profile.season_amp * math.sin(2 * math.pi * (t_seconds + st.phase) / profile.season_period_s)
+
+    spike = 0.0
+    if mode == "normal":
+        # Gradual degradation, steepness set by the slider.
+        st.wear += _WEAR_FRACTION * max(0.0, stress) * margin * random.uniform(0.6, 1.4)
+        if inject_step:
+            st.wear = max(st.wear, margin * random.uniform(*_STEP_OVERSHOOT))
+        # Sub-threshold texture: small, kept under the limit on a healthy machine.
+        if random.random() < profile.spike_prob:
+            spike = random.uniform(*_SPIKE_RANGE) * margin
+    elif mode == "hold":
+        # Keep the breach clearly past the limit until a worker resolves it.
+        st.wear = max(st.wear, margin * random.uniform(*_HOLD_OVERSHOOT))
+    else:  # recover
+        st.wear *= _RECOVER_DECAY
+
+    value = profile.baseline + season + st.noise + profile.sign * (st.wear + spike)
+    return max(profile.floor, round(value, profile.decimals))
+
+
+def _secondary(metric_type: str) -> dict[str, Any]:
+    """Benign secondary readings (not alarm-bearing) for richer context."""
+    if metric_type == "environment":
+        return {"humidity_percent": round(45.0 + random.gauss(0.0, 3.0), 2)}
+    if metric_type == "vibration":
+        # Dominant vibration frequency (gear-mesh / running speed band), stable.
+        return {"frequency_hz": round(50.0 + random.gauss(0.0, 1.5), 2)}
+    return {}
+
+
+def generate_reading(
+    metric_type: str,
+    st: SignalState,
+    *,
+    stress: float,
+    mode: Mode,
+    t_seconds: float,
+    inject_step: bool = False,
+) -> tuple[dict[str, Any], Quality]:
     """
-    Generate environment readings.
+    Produce one reading's `data` dict (all metric fields) + quality.
 
-    Normal:
-    - temp_celsius around 24 ± 2
-    - humidity_percent around 45 ± 8
-
-    Faults:
-    - low: temp slightly above threshold
-    - medium: clearly above threshold
-    - high: large breach (e.g. ~100C to force severity high)
+    `st` carries the signal across ticks and is mutated in place. `mode` is the
+    fault-state-machine mode the runner assigns (normal / hold / recover).
     """
-    temp = 24.0 + _noise(2.0)
-    humidity = 45.0 + _noise(8.0)
-
-    if fault == "low":
-        temp = 82.0 + _noise(0.5)
-    elif fault == "medium":
-        temp = 88.0 + _noise(1.0)
-    elif fault == "high":
-        temp = 100.0 + _noise(1.0)
-
-    return {"temp_celsius": round(temp, 2), "humidity_percent": round(humidity, 2)}, "good"
-
-
-def generate_vibration(fault: FaultMode | None = None) -> tuple[dict[str, Any], Quality]:
-    """
-    Generate vibration readings.
-
-    Normal amplitude is well below the demo threshold (0.5).
-    """
-    amplitude = 0.12 + _noise(0.05)
-    frequency = 60.0 + _noise(2.0)
-
-    if fault == "low":
-        amplitude = 0.55 + _noise(0.02)
-    elif fault == "medium":
-        amplitude = 0.70 + _noise(0.03)
-    elif fault == "high":
-        amplitude = 0.95 + _noise(0.05)
-
-    return {"amplitude_mm": round(amplitude, 3), "frequency_hz": round(frequency, 2)}, "good"
-
-
-def generate_pressure(fault: FaultMode | None = None) -> tuple[dict[str, Any], Quality]:
-    """
-    Generate pressure readings.
-
-    The detector treats pressure as a "below min" anomaly (pressure drop).
-    """
-    pressure = 6.5 + _noise(0.4)
-    if fault == "low":
-        pressure = 4.3 + _noise(0.1)
-    elif fault == "medium":
-        pressure = 3.6 + _noise(0.1)
-    elif fault == "high":
-        pressure = 2.5 + _noise(0.2)
-    return {"pressure_bar": round(pressure, 2)}, "good"
-
-
-def generate_flow(fault: FaultMode | None = None) -> tuple[dict[str, Any], Quality]:
-    """
-    Generate flow readings.
-
-    The detector treats flow as a "below min" anomaly.
-    """
-    flow = 18.0 + _noise(1.5)
-    if fault == "low":
-        flow = 11.5 + _noise(0.3)
-    elif fault == "medium":
-        flow = 9.0 + _noise(0.5)
-    elif fault == "high":
-        flow = 6.0 + _noise(0.6)
-    return {"flow_rate_lpm": round(flow, 2)}, "good"
-
-
-def pick_fault(prob_low: float = 0.08, prob_med: float = 0.04, prob_high: float = 0.02) -> FaultMode | None:
-    """
-    Randomly pick a fault mode.
-
-    Keep probabilities low so anomalies are not constant noise.
-    """
-    r = random.random()
-    if r < prob_high:
-        return "high"
-    if r < prob_high + prob_med:
-        return "medium"
-    if r < prob_high + prob_med + prob_low:
-        return "low"
-    return None
-
+    profile = PROFILES[metric_type]
+    value = _primary_value(
+        profile, st, stress=stress, mode=mode, t_seconds=t_seconds, inject_step=inject_step
+    )
+    data: dict[str, Any] = {profile.field: value, **_secondary(metric_type)}
+    return data, "good"

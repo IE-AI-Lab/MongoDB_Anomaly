@@ -1,7 +1,9 @@
 "use client";
 
 import clsx from "clsx";
+import { useEffect, useRef, useState } from "react";
 
+import { api } from "@/lib/api";
 import type { Anomaly, Reading, Sensor, SystemMetadata } from "@/lib/types";
 import {
   METRIC_TYPE_LABEL,
@@ -16,6 +18,56 @@ interface Props {
   readings: Reading[];
   thresholds: SystemMetadata[];
   activeAnomaly?: Anomaly;
+}
+
+// Per-machine "degradation rate" control. Writes sim_stress (0..1) to the API,
+// debounced; the simulator reads it each cycle to set how fast this machine
+// climbs toward its alarm. Higher = breaches sooner / more often.
+function StressSlider({ sensor }: { sensor: Sensor }) {
+  const [value, setValue] = useState(sensor.sim_stress ?? 0.2);
+  const editedAt = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+
+  // Reconcile with polled data, but don't clobber a value the user just set.
+  useEffect(() => {
+    if (sensor.sim_stress === undefined) return;
+    if (Date.now() - editedAt.current < 3000) return;
+    setValue(sensor.sim_stress);
+  }, [sensor.sim_stress]);
+
+  const onChange = (next: number) => {
+    setValue(next);
+    editedAt.current = Date.now();
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      api.setSensorStress(sensor.sensor_id, next).catch(() => {
+        /* transient; next poll reconciles */
+      });
+    }, 350);
+  };
+
+  useEffect(() => () => timer.current && clearTimeout(timer.current), []);
+
+  const pct = Math.round(value * 100);
+  return (
+    <div className="flex items-center gap-2 px-4 py-2">
+      <span className="shrink-0 text-[10px] uppercase tracking-wide text-mongo-mist">
+        Degradation
+      </span>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        value={pct}
+        onChange={(e) => onChange(Number(e.target.value) / 100)}
+        aria-label={`Degradation rate for ${sensor.equipment_id}`}
+        className="h-1 flex-1 cursor-pointer accent-mongo-green-base"
+      />
+      <span className="w-8 shrink-0 text-right text-[11px] font-medium tabular-nums text-mongo-ink">
+        {pct}%
+      </span>
+    </div>
+  );
 }
 
 export function MachineCard({ sensor, readings, thresholds, activeAnomaly }: Props) {
@@ -86,6 +138,10 @@ export function MachineCard({ sensor, readings, thresholds, activeAnomaly }: Pro
             </div>
           );
         })}
+      </div>
+
+      <div className="border-t border-mongo-border">
+        <StressSlider sensor={sensor} />
       </div>
 
       {flagged && activeAnomaly && (

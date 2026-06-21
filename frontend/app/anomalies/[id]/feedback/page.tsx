@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
@@ -10,8 +11,8 @@ import { LoadingRow } from "@/components/ui/Spinner";
 import { FeedbackForm } from "@/components/FeedbackForm";
 import { formatDateTime } from "@/lib/format";
 
-export default function FeedbackPage({ params }: { params: { id: string } }) {
-  const { id } = params;
+export default function FeedbackPage() {
+  const { id } = useParams<{ id: string }>();
   const [anomaly, setAnomaly] = useState<Anomaly>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();

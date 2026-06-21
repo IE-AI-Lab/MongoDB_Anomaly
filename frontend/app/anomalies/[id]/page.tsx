@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
@@ -27,8 +28,8 @@ function similarCaseText(c: SimilarCase | string): { title: string; body: string
   };
 }
 
-export default function ReportPage({ params }: { params: { id: string } }) {
-  const { id } = params;
+export default function ReportPage() {
+  const { id } = useParams<{ id: string }>();
   const [anomaly, setAnomaly] = useState<Anomaly>();
   const [logs, setLogs] = useState<AgentLog[]>([]);
   const [loading, setLoading] = useState(true);

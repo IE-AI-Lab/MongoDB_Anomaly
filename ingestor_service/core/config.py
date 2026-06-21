@@ -67,9 +67,29 @@ def voyage_embed_model() -> str:
     return os.getenv("VOYAGE_EMBED_MODEL", "voyage-4-lite")
 
 
-# Chat / agent-reasoning config lives in agent_worker/config.py — the worker is a
-# separate process and is the only thing that talks to the LLM. The data layer
-# does no LLM calls, so it holds no chat config.
+# --- Chat assistant: DeepSeek (OpenAI-compatible) ----------------------------
+# The agent_worker is a separate process with its OWN copy of these getters
+# (agent_worker/config.py) — the two packages are decoupled, so the config is
+# duplicated by design rather than shared via a cross-package import. The data
+# layer uses these only for the stateless POST /chat assistant (api/chat.py),
+# which calls the OpenAI-compatible chat-completions endpoint via the `openai`
+# SDK. "OpenAI" here is the wire format, not the vendor — DeepSeek implements it,
+# so the client just points at LLM_BASE_URL; no request goes to OpenAI.
+
+
+def llm_api_key() -> str:
+    """API key for the DeepSeek (OpenAI-compatible) provider. Empty ⇒ POST /chat
+    returns a graceful "assistant not configured" reply instead of calling out."""
+    return os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY", "")
+
+
+def llm_base_url() -> str:
+    """OpenAI-compatible base URL (default DeepSeek; override via LLM_BASE_URL)."""
+    return (os.getenv("LLM_BASE_URL") or "https://api.deepseek.com").rstrip("/")
+
+
+def chat_model() -> str:
+    return os.getenv("CHAT_MODEL", "deepseek-v4-flash")
 
 
 # --- Agent dispatch: stub (stdout) or Redis Streams queue -------------------

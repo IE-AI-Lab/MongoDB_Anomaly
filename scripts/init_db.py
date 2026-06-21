@@ -364,11 +364,13 @@ def seed_system_metadata(db: Database[dict[str, Any]]) -> None:
             "config_type": "anomaly_thresholds",
             "target_metric": "temp_celsius",
             "rules": {
-                "max_allowed_temp_celsius": 80.0,
+                # Ball-mill trunnion bearing: normal ~50 C, alarm 70 C, mill-stop 75 C
+                # (ISO/industry practice). The detector flags the 70 C alarm crossing.
+                "max_allowed_temp_celsius": 70.0,
                 "min_allowed_temp_celsius": 10.0,
                 "consecutive_violating_pings_required": 1,
             },
-            "description": "Temperature limits for environment sensors.",
+            "description": "Trunnion bearing temperature alarm limit (ball mill).",
         },
         {
             "config_type": "anomaly_thresholds",
@@ -384,10 +386,14 @@ def seed_system_metadata(db: Database[dict[str, Any]]) -> None:
             "config_type": "anomaly_thresholds",
             "target_metric": "amplitude_mm",
             "rules": {
-                "max_allowed_amplitude_mm": 0.5,
+                # Vibration as RMS velocity (mm/s) per ISO 10816: <4.5 healthy,
+                # 7.1 alarm (pinion/gear bearings), 11.2 = catastrophic-risk shutdown.
+                # `amplitude_mm` is the stored field key; the frontend already
+                # renders it as "Vibration (mm/s)".
+                "max_allowed_amplitude_mm": 7.1,
                 "consecutive_violating_pings_required": 1,
             },
-            "description": "Vibration amplitude limits.",
+            "description": "Mill drivetrain vibration alarm (mm/s RMS, ISO 10816).",
         },
         {
             "config_type": "anomaly_thresholds",
@@ -397,7 +403,7 @@ def seed_system_metadata(db: Database[dict[str, Any]]) -> None:
                 "min_allowed_pressure_bar": 4.5,
                 "consecutive_violating_pings_required": 1,
             },
-            "description": "Hydraulic pressure operating band.",
+            "description": "Trunnion lube-oil pressure band; a drop below 4.5 bar risks bearing film loss.",
         },
         {
             "config_type": "anomaly_thresholds",
@@ -406,7 +412,7 @@ def seed_system_metadata(db: Database[dict[str, Any]]) -> None:
                 "min_allowed_flow_rate_lpm": 12.0,
                 "consecutive_violating_pings_required": 1,
             },
-            "description": "Coolant loop minimum flow.",
+            "description": "Mill bearing coolant loop minimum flow.",
         },
     ]
 
@@ -590,9 +596,18 @@ def seed_sensors(db: Database[dict[str, Any]]) -> None:
     #     "metrics": list[str],             # Metric fields this sensor reports.
     #     "expected_interval_seconds": int,
     #     "is_active": bool,
+    #     "sim_stress": float,              # 0..1 simulator degradation rate (slider).
     #     "created_at_utc": datetime,
     #     "updated_at_utc": datetime,
     # }
+    #
+    # The fleet models the monitoring points of ONE ball mill (MILL-01): both
+    # trunnion bearings, the girth-gear and pinion drivetrain, the lube-oil
+    # system, and the bearing coolant loop. `sim_stress` is the per-machine
+    # degradation-rate slider the simulator reads each tick (0 = healthy/flat,
+    # 1 = steep climb toward the alarm). Upserted so re-running applies relabels
+    # and threshold retunes without wiping a hand-set sim_stress is NOT a goal —
+    # the slider value is intentionally re-seeded to the defaults below on rerun.
     collection: Collection[dict[str, Any]] = db["sensors"]
     now = utc_now()
 
@@ -601,83 +616,80 @@ def seed_sensors(db: Database[dict[str, Any]]) -> None:
             "sensor_id": "SENS-ENV-001",
             "metric_type": "environment",
             "facility_id": "FAC-01",
-            "equipment_id": "ROOM-PACK-01",
-            "equipment_type": "packaging_room",
+            "equipment_id": "MILL-01-TRUNNION-DE",
+            "equipment_type": "trunnion_bearing",
             "metrics": ["temp_celsius", "humidity_percent"],
             "expected_interval_seconds": 5,
             "is_active": True,
-            "created_at_utc": now,
-            "updated_at_utc": now,
+            "sim_stress": 0.25,
         },
         {
             "sensor_id": "SENS-ENV-002",
             "metric_type": "environment",
             "facility_id": "FAC-01",
-            "equipment_id": "ROOM-CTRL-01",
-            "equipment_type": "control_room",
+            "equipment_id": "MILL-01-TRUNNION-NDE",
+            "equipment_type": "trunnion_bearing",
             "metrics": ["temp_celsius", "humidity_percent"],
             "expected_interval_seconds": 5,
             "is_active": True,
-            "created_at_utc": now,
-            "updated_at_utc": now,
+            "sim_stress": 0.15,
         },
         {
             "sensor_id": "SENS-VIB-001",
             "metric_type": "vibration",
             "facility_id": "FAC-01",
-            "equipment_id": "PUMP-A12",
-            "equipment_type": "centrifugal_pump",
+            "equipment_id": "MILL-01-GIRTH-GEAR",
+            "equipment_type": "girth_gear",
             "metrics": ["amplitude_mm", "frequency_hz"],
             "expected_interval_seconds": 5,
             "is_active": True,
-            "created_at_utc": now,
-            "updated_at_utc": now,
+            "sim_stress": 0.30,
         },
         {
             "sensor_id": "SENS-VIB-002",
             "metric_type": "vibration",
             "facility_id": "FAC-01",
-            "equipment_id": "MOTOR-B07",
-            "equipment_type": "conveyor_motor",
+            "equipment_id": "MILL-01-PINION",
+            "equipment_type": "pinion_bearing",
             "metrics": ["amplitude_mm", "frequency_hz"],
             "expected_interval_seconds": 5,
             "is_active": True,
-            "created_at_utc": now,
-            "updated_at_utc": now,
+            "sim_stress": 0.20,
         },
         {
             "sensor_id": "SENS-PRES-001",
             "metric_type": "pressure",
             "facility_id": "FAC-01",
-            "equipment_id": "HYD-LINE-03",
-            "equipment_type": "hydraulic_line",
+            "equipment_id": "MILL-01-LUBE-OIL",
+            "equipment_type": "lube_oil_system",
             "metrics": ["pressure_bar"],
             "expected_interval_seconds": 5,
             "is_active": True,
-            "created_at_utc": now,
-            "updated_at_utc": now,
+            "sim_stress": 0.15,
         },
         {
             "sensor_id": "SENS-FLOW-001",
             "metric_type": "flow",
             "facility_id": "FAC-01",
-            "equipment_id": "COOL-LOOP-01",
+            "equipment_id": "MILL-01-COOLANT",
             "equipment_type": "coolant_loop",
             "metrics": ["flow_rate_lpm"],
             "expected_interval_seconds": 5,
             "is_active": True,
-            "created_at_utc": now,
-            "updated_at_utc": now,
+            "sim_stress": 0.15,
         },
     ]
 
     for doc in sensor_docs:
-        seed_document_if_missing(
-            collection,
+        # Upsert (not insert-if-missing) so relabels + sim_stress defaults apply
+        # on rerun. created_at_utc is preserved on existing docs via $setOnInsert.
+        result = collection.update_one(
             {"sensor_id": doc["sensor_id"]},
-            doc,
-            f"sensors.{doc['sensor_id']}",
+            {"$set": {**doc, "updated_at_utc": now}, "$setOnInsert": {"created_at_utc": now}},
+            upsert=True,
         )
+        verb = "Seeded" if result.upserted_id is not None else "Updated"
+        print(f"{verb} sensors.{doc['sensor_id']}")
 
 
 def seed_knowledge_base(db: Database[dict[str, Any]]) -> None:

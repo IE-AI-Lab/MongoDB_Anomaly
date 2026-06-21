@@ -42,10 +42,14 @@ export default function DashboardPage() {
     error,
   } = useDashboardData();
 
-  // Newest active anomaly per sensor, for the per-card warning banner.
+  // Newest still-open anomaly per sensor, for the per-card warning banner. The
+  // machine stays in alarm (the simulator holds the breach) until the anomaly is
+  // RESOLVED — so the banner must persist through unresolved → analyzed →
+  // assigned, and clear only on resolved. anomalies are sorted newest-first, so
+  // the first non-resolved hit per sensor is the current one.
   const anomalyBySensor: Record<string, Anomaly> = {};
   for (const a of anomalies) {
-    if (a.status === "unresolved" || a.status === "analyzed") {
+    if (a.status !== "resolved") {
       if (!anomalyBySensor[a.sensor_id]) anomalyBySensor[a.sensor_id] = a;
     }
   }

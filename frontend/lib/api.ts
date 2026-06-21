@@ -123,6 +123,12 @@ export const api = {
   // --- queue / pipeline ---
   queueStatus: () => request<QueueStatus>(`/queues/status`),
 
+  // --- plant assistant (stateless chat over a live plant snapshot) ---
+  chat: (body: {
+    message: string;
+    history: { role: "user" | "assistant"; content: string }[];
+  }) => request<{ reply: string }>(`/chat`, { method: "POST", json: body }),
+
   // --- simulation control ---
   simStatus: () => request<SimStatus>(`/simulation/status`),
   simStart: () => request<SimStatus>(`/simulation/start`, { method: "POST" }),
@@ -132,4 +138,10 @@ export const api = {
       method: "POST",
       json: {},
     }),
+  // Per-machine degradation rate (0..1) the simulator reads each cycle.
+  setSensorStress: (sensorId: string, sim_stress: number) =>
+    request<{ sensor_id: string; sim_stress: number }>(
+      `/simulation/sensors/${encodeURIComponent(sensorId)}/stress`,
+      { method: "POST", json: { sim_stress } }
+    ),
 };

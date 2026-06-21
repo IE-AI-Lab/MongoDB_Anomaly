@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import typography from "@tailwindcss/typography";
 
 // MongoDB "LeafyGreen" light (Atlas console) palette. Forest green for chrome,
 // bright green for primary actions, cool slate neutrals for surfaces/text.
@@ -57,7 +58,9 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  // typography powers the `prose` classes the chat assistant uses to render
+  // the LLM's Markdown replies (ChatWidget.tsx).
+  plugins: [typography],
 };
 
 export default config;

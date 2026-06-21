@@ -16,8 +16,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from ..messaging import queue
 from ..core.db import col
@@ -114,3 +114,27 @@ def simulation_start() -> dict[str, bool]:
 def simulation_stop() -> dict[str, bool]:
     """Pause telemetry emission (the simulator process stays alive)."""
     return {"running": simulation_control.set_running(False)}
+
+
+# ---------------------------------------------------------------------------
+# Per-machine degradation rate — the dashboard "stress" slider; the simulator
+# reads sim_stress off each sensor each cycle to set how fast its signal climbs
+# toward the alarm (0 = healthy/flat, 1 = steep climb → frequent anomalies).
+# ---------------------------------------------------------------------------
+
+
+class StressRequest(BaseModel):
+    sim_stress: float = Field(..., ge=0.0, le=1.0)
+
+
+@router.post("/simulation/sensors/{sensor_id}/stress")
+def set_sensor_stress(sensor_id: str, req: StressRequest) -> dict[str, Any]:
+    """Set a sensor's simulator degradation rate (0..1). Read back via GET /sensors."""
+    now = datetime.now(timezone.utc)
+    result = col("sensors").update_one(
+        {"sensor_id": sensor_id},
+        {"$set": {"sim_stress": req.sim_stress, "updated_at_utc": now}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(404, "sensor not found")
+    return {"sensor_id": sensor_id, "sim_stress": req.sim_stress}

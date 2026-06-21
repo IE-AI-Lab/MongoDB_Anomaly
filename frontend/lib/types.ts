@@ -17,6 +17,7 @@ export interface Sensor {
   metrics: string[]; // metric fields this sensor reports, e.g. ["temp_celsius"]
   expected_interval_seconds: number;
   is_active: boolean;
+  sim_stress?: number; // 0..1 simulator degradation rate (dashboard slider)
 }
 
 // telemetry_history doc. Metric values are FLATTENED under `reading`

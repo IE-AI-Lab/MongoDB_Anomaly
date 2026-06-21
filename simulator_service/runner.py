@@ -3,9 +3,20 @@ Simulator runner.
 
 This is the orchestration layer:
 - iterate sensors
-- generate a reading per sensor
-- build the standardized telemetry event envelope
-- send it to the ingestor over HTTP
+- advance each sensor's continuous ball-mill signal (see generators.py)
+- run a per-sensor fault state machine so a breach is held until a worker
+  resolves it, then decays back to baseline
+- build the standardized telemetry event envelope and POST it to the ingestor
+
+Fault state machine (per sensor):
+
+    normal ──(degradation/step crosses the limit → anomaly created)──▶ hold
+    hold   ──(worker resolves the anomaly: no longer open)───────────▶ recover
+    recover ──(signal decayed back to baseline)─────────────────────▶ normal
+
+The simulator learns which sensors still have an *open* anomaly with one
+`GET /anomalies` poll per tick (fail-safe), and reads the per-sensor `sim_stress`
+slider with a periodic `GET /sensors` poll (fail-open to cached/default).
 """
 
 from __future__ import annotations
@@ -17,23 +28,34 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from .generators import (
-    FaultMode,
-    generate_environment,
-    generate_flow,
-    generate_pressure,
-    generate_vibration,
-    pick_fault,
+from .generators import Mode, SignalState, generate_reading, recovered, PROFILES
+from .http_client import (
+    get_open_anomaly_sensors,
+    get_sensor_stress,
+    get_simulation_status,
+    post_telemetry,
 )
-from .http_client import get_simulation_status, post_telemetry
 from .spec import SensorSpec, SENSORS
+
+# How often to refresh the per-sensor stress slider values from the API.
+_STRESS_REFRESH_TICKS = 6
+# Per-tick probability of a sudden step-fault, at stress=1 (scales with stress).
+_STEP_PROB_AT_MAX = 0.006
+# With --deterministic-demo, clamp every sensor's effective stress to at least
+# this, so a fresh demo produces anomalies promptly out of the box.
+_DEMO_STRESS_FLOOR = 0.5
 
 
 @dataclass
 class SensorRuntimeState:
-    """Mutable per-sensor runtime state (sequence counters, last values, etc.)."""
+    """Mutable per-sensor runtime state across ticks."""
 
+    signal: SignalState
     sequence_number: int = 0
+    mode: Mode = "normal"
+    # Set once the detector has actually created an anomaly for the current
+    # breach, so we don't recover during the warm-up before it fires.
+    anomaly_observed: bool = False
 
 
 def utc_now_iso() -> str:
@@ -44,25 +66,24 @@ def utc_now_iso() -> str:
 def build_event(
     sensor: SensorSpec,
     state: SensorRuntimeState,
-    forced_fault: FaultMode | None = None,
-    prob_low: float = 0.004,
-    prob_med: float = 0.002,
-    prob_high: float = 0.001,
+    *,
+    stress: float,
+    t_seconds: float,
+    inject_step: bool,
 ) -> dict[str, Any]:
     """
     Build one telemetry event for a sensor.
 
     The payload matches the ingestor's TelemetryIngestEvent contract.
     """
-    fault = forced_fault if forced_fault is not None else pick_fault(prob_low, prob_med, prob_high)
-    if sensor.metric_type == "environment":
-        data, quality = generate_environment(fault)
-    elif sensor.metric_type == "vibration":
-        data, quality = generate_vibration(fault)
-    elif sensor.metric_type == "pressure":
-        data, quality = generate_pressure(fault)
-    else:
-        data, quality = generate_flow(fault)
+    data, quality = generate_reading(
+        sensor.metric_type,
+        state.signal,
+        stress=stress,
+        mode=state.mode,
+        t_seconds=t_seconds,
+        inject_step=inject_step,
+    )
 
     state.sequence_number += 1
 
@@ -83,34 +104,43 @@ def build_event(
     }
 
 
+def _apply_transitions(
+    sensor: SensorSpec, state: SensorRuntimeState, open_sensors: set[str]
+) -> None:
+    """Advance the fault state machine for one sensor based on open anomalies."""
+    if sensor.sensor_id in open_sensors:
+        # An anomaly exists for this sensor → hold the breach until it's resolved.
+        state.anomaly_observed = True
+        if state.mode != "hold":
+            state.mode = "hold"
+    elif state.mode == "hold" and state.anomaly_observed:
+        # The anomaly we saw is gone (resolved) → start recovering to baseline.
+        state.mode = "recover"
+
+
 def run(
     base_url: str,
     tick_seconds: int = 5,
     emit_probability: float = 0.7,
-    prob_low: float = 0.004,
-    prob_med: float = 0.002,
-    prob_high: float = 0.001,
     deterministic_demo: bool = False,
-    demo_interval_ticks: int = 24,  # 24 ticks x 5s = one guaranteed anomaly every 2 min
 ) -> None:
     """
     Start the simulator loop.
 
-    Behavior:
-    - Each tick, sensors are considered in a RANDOM order (shuffled).
-    - Each sensor independently emits with probability `emit_probability`,
-      so the number of events per tick varies instead of always being all sensors.
-    - Sleeps between ticks to approximate real-time.
-    - Prints a minimal progress line every tick.
-    - If deterministic_demo is enabled, every `demo_interval_ticks` we force at least
-      one guaranteed anomaly by emitting two high-fault readings for SENS-ENV-001.
+    Each tick: sensors are considered in random order. A healthy sensor emits
+    with probability `emit_probability`; a faulted/recovering sensor emits every
+    tick so its breach stays sustained and its recovery is visible. Per-sensor
+    `sim_stress` (the dashboard slider) sets how fast each machine degrades.
 
-    Why randomized:
-    - Real fleets do not report in a fixed, synchronized order every interval.
-    - Consecutive-violation detection still works; it just spans more ticks for
-      sensors that occasionally skip a tick.
+    `deterministic_demo` raises every sensor's effective stress to a floor so a
+    fresh demo trips anomalies promptly without anyone touching the sliders.
     """
-    states: dict[str, SensorRuntimeState] = {s.sensor_id: SensorRuntimeState() for s in SENSORS}
+    states: dict[str, SensorRuntimeState] = {
+        s.sensor_id: SensorRuntimeState(signal=SignalState.new(PROFILES[s.metric_type].season_period_s))
+        for s in SENSORS
+    }
+    stress_map: dict[str, float] = {s.sensor_id: s.default_stress for s in SENSORS}
+    open_sensors: set[str] = set()
 
     tick = 0
     while True:
@@ -124,36 +154,51 @@ def run(
             time.sleep(tick_seconds)
             continue
 
+        # Refresh slider values periodically (fail-open: keep cache on error).
+        if tick == 1 or tick % _STRESS_REFRESH_TICKS == 0:
+            latest = get_sensor_stress(base_url)
+            if latest:
+                stress_map.update(latest)
+
+        # Which sensors still have an open anomaly? Fail-safe: keep last known
+        # set on error so a blip doesn't recover every held breach at once.
+        latest_open = get_open_anomaly_sensors(base_url)
+        if latest_open is not None:
+            open_sensors = latest_open
+
+        t_seconds = float(tick * tick_seconds)
         shuffled = list(SENSORS)
         random.shuffle(shuffled)
 
         sent = 0
+        faulted = 0
         for sensor in shuffled:
-            if random.random() > emit_probability:
+            state = states[sensor.sensor_id]
+            _apply_transitions(sensor, state, open_sensors)
+
+            stress = stress_map.get(sensor.sensor_id, sensor.default_stress)
+            if deterministic_demo:
+                stress = max(stress, _DEMO_STRESS_FLOOR)
+
+            # Healthy sensors skip some ticks (real fleets aren't synchronized);
+            # faulted/recovering sensors always emit so the breach is continuous.
+            if state.mode == "normal" and random.random() > emit_probability:
                 continue
+
+            inject_step = state.mode == "normal" and random.random() < _STEP_PROB_AT_MAX * stress
+
             payload = build_event(
-                sensor,
-                states[sensor.sensor_id],
-                prob_low=prob_low,
-                prob_med=prob_med,
-                prob_high=prob_high,
+                sensor, state, stress=stress, t_seconds=t_seconds, inject_step=inject_step
             )
             post_telemetry(base_url, payload)
             sent += 1
 
-        if deterministic_demo and demo_interval_ticks > 0 and tick % demo_interval_ticks == 0:
-            demo_sensor = next((s for s in SENSORS if s.sensor_id == "SENS-ENV-001"), SENSORS[0])
-            # consecutive requirement is 2, so two forced high readings guarantees a trigger.
-            payload_1 = build_event(demo_sensor, states[demo_sensor.sensor_id], forced_fault="high")
-            payload_2 = build_event(demo_sensor, states[demo_sensor.sensor_id], forced_fault="high")
-            post_telemetry(base_url, payload_1)
-            post_telemetry(base_url, payload_2)
-            sent += 2
-            print(
-                f"[SIM] demo injected guaranteed anomaly on tick={tick} "
-                f"sensor={demo_sensor.sensor_id}"
-            )
+            # Once a recovering signal is back to baseline, return to normal.
+            if state.mode == "recover" and recovered(sensor.metric_type, state.signal):
+                state.mode = "normal"
+                state.anomaly_observed = False
+            if state.mode != "normal":
+                faulted += 1
 
-        print(f"[SIM] tick={tick} sent={sent}/{len(SENSORS)} events")
+        print(f"[SIM] tick={tick} sent={sent}/{len(SENSORS)} events, {faulted} faulted")
         time.sleep(tick_seconds)
-
