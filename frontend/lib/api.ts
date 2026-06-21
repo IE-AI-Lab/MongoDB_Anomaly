@@ -123,6 +123,12 @@ export const api = {
   // --- queue / pipeline ---
   queueStatus: () => request<QueueStatus>(`/queues/status`),
 
+  // --- plant assistant (stateless chat over a live plant snapshot) ---
+  chat: (body: {
+    message: string;
+    history: { role: "user" | "assistant"; content: string }[];
+  }) => request<{ reply: string }>(`/chat`, { method: "POST", json: body }),
+
   // --- simulation control ---
   simStatus: () => request<SimStatus>(`/simulation/status`),
   simStart: () => request<SimStatus>(`/simulation/start`, { method: "POST" }),
