@@ -19,13 +19,16 @@ class CounterState:
     """Per-metric detector state for a single (sensor_id, metric) stream.
 
     Holds three independent detectors' state:
-    - threshold:        consecutive_violations counter (debounce)
+    - threshold:        consecutive_violations counter (debounce) + a re-arm flag
     - rate-of-change:   the rolling window + a re-arm flag
     - statistical:      the rolling window + a re-arm flag
 
     The re-arm flags prevent a single sustained excursion from emitting an
     anomaly on every subsequent reading: once a detector fires it is disarmed
-    until a reading returns to normal, then it re-arms.
+    until a reading returns to normal, then it re-arms. This is what makes a
+    breach that *stays* over the limit (held there until a worker resolves it)
+    a single anomaly rather than one per reading — important because the seeded
+    thresholds require only 1 consecutive violation.
     """
 
     consecutive_violations: int = 0
@@ -34,6 +37,7 @@ class CounterState:
     # the pipeline runs intermittently, so "last N readings" is more reliable
     # than "last N minutes").
     values: list[float] = field(default_factory=list)
+    threshold_armed: bool = True
     roc_armed: bool = True
     stat_armed: bool = True
 

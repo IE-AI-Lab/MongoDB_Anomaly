@@ -12,18 +12,20 @@ NOTE: associated_error_codes here should intersect the codes the detector emits
 error_code filter can join anomalies to docs.
 
 NOTE: equipment_type values must match the seeded sensor fleet's equipment_type
-(see scripts/init_db.py seed_sensors): packaging_room, control_room, centrifugal_pump,
-conveyor_motor, hydraulic_line, coolant_loop. This is the join key for
-search_knowledge's equipment_type filter — every sensor type below has at least
-one matching active doc. error_code remains the primary join; equipment_type is
-a scoping filter on top of it.
+(see scripts/init_db.py seed_sensors) — the fleet models one ball mill (MILL-01):
+trunnion_bearing, girth_gear, pinion_bearing, lube_oil_system, coolant_loop. This
+is the join key for search_knowledge's equipment_type filter — every sensor type
+below has at least one matching active doc. error_code remains the primary join;
+equipment_type is a scoping filter on top of it. (The diagnostic prose below is
+condition-monitoring symptom knowledge that transfers across rotating equipment;
+the tags map each doc to the mill component whose failure signature it matches.)
 """
 
 KNOWLEDGE_SEED: list[dict] = [
     # --- environment (temperature / humidity) ---
     {
         "section_title": "High temperature on industrial chiller loop",
-        "equipment_type": "packaging_room",
+        "equipment_type": "trunnion_bearing",
         "associated_error_codes": ["TEMP_HIGH", "COOLING_FAULT"],
         "text_content": (
             "When chiller outlet temperature exceeds the setpoint by more than 10%, "
@@ -35,7 +37,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "Server-room humidity rising above 60%",
-        "equipment_type": "control_room",
+        "equipment_type": "trunnion_bearing",
         "associated_error_codes": ["HUMIDITY_HIGH"],
         "text_content": (
             "Humidity drift above 60% in conditioned space is most often a stuck "
@@ -46,7 +48,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "Simultaneous temperature rise across multiple sensors",
-        "equipment_type": "packaging_room",
+        "equipment_type": "trunnion_bearing",
         "associated_error_codes": ["TEMP_HIGH"],
         "text_content": (
             "If several environment sensors trend up at the same time, suspect a "
@@ -57,7 +59,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "High temperature in control room / server space",
-        "equipment_type": "control_room",
+        "equipment_type": "trunnion_bearing",
         "associated_error_codes": ["TEMP_HIGH", "COOLING_FAULT"],
         "text_content": (
             "Rising temperature in a control room or server space almost always "
@@ -70,7 +72,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "Packaging room humidity rising above limit",
-        "equipment_type": "packaging_room",
+        "equipment_type": "trunnion_bearing",
         "associated_error_codes": ["HUMIDITY_HIGH"],
         "text_content": (
             "Humidity climbing in a packaging room risks condensation on product "
@@ -84,7 +86,7 @@ KNOWLEDGE_SEED: list[dict] = [
     # --- vibration ---
     {
         "section_title": "Pump bearing vibration above 4.5 mm/s",
-        "equipment_type": "centrifugal_pump",
+        "equipment_type": "girth_gear",
         "associated_error_codes": ["VIBRATION_HIGH", "BEARING_WEAR"],
         "text_content": (
             "Sustained vibration above 4.5 mm/s RMS on a centrifugal pump is a "
@@ -96,7 +98,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "Motor vibration spike during start-up",
-        "equipment_type": "conveyor_motor",
+        "equipment_type": "pinion_bearing",
         "associated_error_codes": ["VIBRATION_HIGH", "MISALIGNMENT"],
         "text_content": (
             "A vibration spike on motor start-up that settles within 30 seconds is "
@@ -107,7 +109,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "Fan vibration after blade cleaning or replacement",
-        "equipment_type": "conveyor_motor",
+        "equipment_type": "girth_gear",
         "associated_error_codes": ["VIBRATION_HIGH", "IMBALANCE"],
         "text_content": (
             "New vibration on a fan after cleaning or blade replacement is almost "
@@ -119,7 +121,7 @@ KNOWLEDGE_SEED: list[dict] = [
     # --- pressure ---
     {
         "section_title": "Hydraulic system pressure drop below threshold",
-        "equipment_type": "hydraulic_line",
+        "equipment_type": "lube_oil_system",
         "associated_error_codes": ["PRESSURE_LOW", "LEAK_SUSPECTED"],
         "text_content": (
             "Hydraulic pressure dropping below the configured minimum while load "
@@ -130,7 +132,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "Pneumatic main line pressure spikes",
-        "equipment_type": "hydraulic_line",
+        "equipment_type": "lube_oil_system",
         "associated_error_codes": ["PRESSURE_HIGH"],
         "text_content": (
             "Repeated pressure spikes above setpoint on a pneumatic main line "
@@ -141,7 +143,7 @@ KNOWLEDGE_SEED: list[dict] = [
     },
     {
         "section_title": "Slow pressure rise after compressor start",
-        "equipment_type": "hydraulic_line",
+        "equipment_type": "lube_oil_system",
         "associated_error_codes": ["PRESSURE_LOW", "LEAK_SUSPECTED"],
         "text_content": (
             "If a compressor takes much longer than baseline to build pressure, "
@@ -186,7 +188,7 @@ KNOWLEDGE_SEED: list[dict] = [
     # --- cross-cutting ---
     {
         "section_title": "Combined vibration + temperature rise on motor",
-        "equipment_type": "conveyor_motor",
+        "equipment_type": "pinion_bearing",
         "associated_error_codes": ["VIBRATION_HIGH", "TEMP_HIGH", "BEARING_WEAR"],
         "text_content": (
             "When vibration and temperature both trend up on the same motor over "

@@ -204,17 +204,29 @@ def _check_threshold(
     threshold: Threshold,
     state: CounterState,
 ) -> Optional[dict[str, Any]]:
-    """Static threshold detector with consecutive-violation debounce."""
+    """Static threshold detector with consecutive-violation debounce.
+
+    Once it fires, the detector disarms and stays silent for the rest of the
+    breach episode — a value that climbs over the limit and is *held* there
+    (until a worker resolves the anomaly) produces exactly one anomaly, not one
+    per reading. It re-arms only when a reading returns to the normal side of
+    the limit. Mirrors the roc_armed / stat_armed pattern of the other two
+    detectors.
+    """
     if not _is_violation(value, threshold):
         state.consecutive_violations = 0
+        state.threshold_armed = True  # back to normal → re-arm for the next episode
         return None
 
     state.consecutive_violations += 1
     if state.consecutive_violations < threshold.consecutive_required:
         return None
 
+    if not state.threshold_armed:
+        return None  # ongoing breach already reported; stay silent until recovery
+    state.threshold_armed = False
+
     consecutive_count = state.consecutive_violations
-    state.consecutive_violations = 0  # reset so we don't spam every tick
 
     severity_fields = build_anomaly_severity_fields(
         observed=value, limit=threshold.limit, direction=threshold.direction

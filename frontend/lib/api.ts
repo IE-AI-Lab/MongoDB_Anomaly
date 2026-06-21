@@ -138,4 +138,10 @@ export const api = {
       method: "POST",
       json: {},
     }),
+  // Per-machine degradation rate (0..1) the simulator reads each cycle.
+  setSensorStress: (sensorId: string, sim_stress: number) =>
+    request<{ sensor_id: string; sim_stress: number }>(
+      `/simulation/sensors/${encodeURIComponent(sensorId)}/stress`,
+      { method: "POST", json: { sim_stress } }
+    ),
 };

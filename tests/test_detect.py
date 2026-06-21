@@ -126,6 +126,30 @@ def test_normal_reading_resets_counter(monkeypatch, fake_col):
     assert fake_col("anomalies").docs == []
 
 
+def test_sustained_breach_creates_single_anomaly(monkeypatch, fake_col):
+    # Seeded thresholds require only 1 consecutive violation, so a breach held
+    # over the limit (the simulator keeps it there until a worker resolves it)
+    # must still produce exactly ONE anomaly, not one per reading.
+    threshold = Threshold("amplitude_mm", "above", 0.5, 1)
+    monkeypatch.setattr(detect, "get_threshold", lambda sensor_id, metric_name: threshold)
+
+    assert detect.process_telemetry(_telemetry(0.9)) is not None  # episode starts → fires once
+    for _ in range(5):
+        assert detect.process_telemetry(_telemetry(0.9)) is None  # held breach stays silent
+    assert len(fake_col("anomalies").docs) == 1
+
+
+def test_threshold_rearms_after_return_to_normal(monkeypatch, fake_col):
+    threshold = Threshold("amplitude_mm", "above", 0.5, 1)
+    monkeypatch.setattr(detect, "get_threshold", lambda sensor_id, metric_name: threshold)
+
+    assert detect.process_telemetry(_telemetry(0.9)) is not None  # first episode fires
+    assert detect.process_telemetry(_telemetry(0.9)) is None       # still breaching → suppressed
+    assert detect.process_telemetry(_telemetry(0.1)) is None        # recovered → re-arm
+    assert detect.process_telemetry(_telemetry(0.9)) is not None    # new episode fires again
+    assert len(fake_col("anomalies").docs) == 2
+
+
 def test_no_threshold_means_no_anomaly(monkeypatch, fake_col):
     monkeypatch.setattr(detect, "get_threshold", lambda sensor_id, metric_name: None)
     assert detect.process_telemetry(_telemetry(99.0)) is None

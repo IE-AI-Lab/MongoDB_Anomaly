@@ -20,13 +20,14 @@ from scripts.knowledge_seed import KNOWLEDGE_SEED
 
 # Seeded sensor fleet, as equipment_type -> metric_type (scripts/init_db.py
 # seed_sensors). This is the source of truth for what each equipment_type can
-# actually report — and therefore which error codes its anomalies carry.
+# actually report — and therefore which error codes its anomalies carry. The
+# fleet models one ball mill (MILL-01): two trunnion bearings, the girth-gear
+# and pinion drivetrain, the lube-oil system, and the bearing coolant loop.
 FLEET = {
-    "packaging_room": "environment",
-    "control_room": "environment",
-    "centrifugal_pump": "vibration",
-    "conveyor_motor": "vibration",
-    "hydraulic_line": "pressure",
+    "trunnion_bearing": "environment",
+    "girth_gear": "vibration",
+    "pinion_bearing": "vibration",
+    "lube_oil_system": "pressure",
     "coolant_loop": "flow",
 }
 

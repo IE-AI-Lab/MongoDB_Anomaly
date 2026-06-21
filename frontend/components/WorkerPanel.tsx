@@ -19,13 +19,13 @@ export function WorkerPanel({ staff }: { staff: Staff[] }) {
   const available = staff.filter((s) => s.is_on_call).length;
 
   return (
-    <Card className="flex h-full flex-col">
+    <Card className="flex flex-col">
       <header className="border-b border-mongo-border px-5 py-4">
         <h2 className="text-base font-semibold text-mongo-ink">Field Workers</h2>
         <p className="mt-0.5 text-xs text-mongo-mist">{available} available</p>
       </header>
 
-      <ul className="divide-y divide-mongo-border overflow-y-auto">
+      <ul className="divide-y divide-mongo-border">
         {staff.length === 0 && <EmptyRow label="No staff" />}
         {staff.map((s) => (
           <li key={s.employee_id} className="flex items-start gap-3 px-5 py-3.5">
