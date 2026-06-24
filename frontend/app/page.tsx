@@ -66,7 +66,10 @@ export default function DashboardPage() {
   useEffect(() => {
     if (loading) return; // wait for the first completed fetch before priming
     const active = anomalies.filter(
-      (a) => a.status === "unresolved" || a.status === "analyzed"
+      (a) =>
+        a.status === "unresolved" ||
+        a.status === "processing" ||
+        a.status === "analyzed"
     );
     if (!toastPrimed) {
       // First load this session: record what already exists without toasting it.

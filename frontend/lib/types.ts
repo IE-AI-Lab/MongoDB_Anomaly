@@ -3,7 +3,14 @@
 
 export type MetricType = "environment" | "vibration" | "pressure" | "flow";
 export type SeverityType = "low" | "medium" | "high";
-export type AnomalyStatus = "unresolved" | "analyzed" | "assigned" | "resolved";
+// `processing` = the agent worker is actively investigating (set between job
+// pickup and the analysis PATCH). Rendered as "In progress" in the UI.
+export type AnomalyStatus =
+  | "unresolved"
+  | "processing"
+  | "analyzed"
+  | "assigned"
+  | "resolved";
 export type StaffRole = "staff" | "senior" | "manager";
 // How the detector flagged an anomaly (see ingestor_service/detector/detect.py).
 export type DetectionMethod = "threshold" | "rate_of_change" | "statistical";

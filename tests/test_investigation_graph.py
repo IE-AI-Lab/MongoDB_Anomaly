@@ -2,8 +2,18 @@
 
 from __future__ import annotations
 
+from agent_worker.anomaly_graph import route_status
 from agent_worker.decision_parser import enrich_from_tool_messages
 from agent_worker.investigation_agent import _fallback_decision
+
+
+def test_route_status_processes_unresolved_and_processing():
+    # Retry-safety: a crashed worker can leave an anomaly 'processing'; a
+    # redelivery must re-run it, while finished states skip idempotently.
+    assert route_status({"anomaly": {"status": "unresolved"}}) == "process"
+    assert route_status({"anomaly": {"status": "processing"}}) == "process"
+    for done in ("analyzed", "assigned", "resolved"):
+        assert route_status({"anomaly": {"status": done}}) == "skip"
 
 
 def test_fallback_decision_includes_error_code():

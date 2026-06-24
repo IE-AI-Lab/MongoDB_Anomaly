@@ -71,6 +71,17 @@ def test_patch_allows_forward_transition_to_analyzed(fake_db):
     assert "_id" not in result
 
 
+def test_patch_allows_unresolved_to_processing(fake_db):
+    result = routes_write.patch_anomaly("ANOM-1", routes_write.AnalysisPatch(status="processing"))
+    assert result["status"] == "processing"
+
+
+def test_patch_allows_processing_to_analyzed(fake_db):
+    routes_write.patch_anomaly("ANOM-1", routes_write.AnalysisPatch(status="processing"))
+    result = routes_write.patch_anomaly("ANOM-1", routes_write.AnalysisPatch(status="analyzed"))
+    assert result["status"] == "analyzed"
+
+
 def test_patch_rejects_assigned_or_resolved_status(fake_db):
     with pytest.raises(HTTPException) as err:
         routes_write.patch_anomaly("ANOM-1", routes_write.AnalysisPatch(status="assigned"))

@@ -144,4 +144,18 @@ export const api = {
       `/simulation/sensors/${encodeURIComponent(sensorId)}/stress`,
       { method: "POST", json: { sim_stress } }
     ),
+  // Deterministically create one anomaly (the "Trigger anomaly" button). Omit
+  // sensorId to fault the first active sensor.
+  createAnomaly: (sensorId?: string) =>
+    request<{
+      anomaly_id: string;
+      sensor_id: string;
+      error_code: string;
+      severity_type: string;
+      severity_level: number;
+      status: string;
+    }>(`/simulation/anomaly`, {
+      method: "POST",
+      json: sensorId ? { sensor_id: sensorId } : {},
+    }),
 };

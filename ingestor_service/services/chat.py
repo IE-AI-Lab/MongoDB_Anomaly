@@ -17,13 +17,23 @@ Embeddings/vectors are irrelevant here — this is a plain chat-completions call
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from ..core import config
 from ..core.db import col
 
 log = logging.getLogger(__name__)
+
+# App-wide display timezone (Spain/Madrid). Storage stays UTC; we localize only
+# what the assistant shows the operator. DST-aware via the IANA database (needs
+# the `tzdata` package on Windows); falls back to UTC if it's unavailable.
+try:
+    from zoneinfo import ZoneInfo
+
+    _DISPLAY_TZ: Any = ZoneInfo("Europe/Madrid")
+except Exception:  # pragma: no cover - tz database missing (pip install tzdata)
+    _DISPLAY_TZ = None
 
 # Keep the prompt bounded — the fleet is small, but an unattended run can
 # accumulate many anomalies/feedback entries, so cap the noisier collections.
@@ -44,7 +54,8 @@ SYSTEM_PROMPT = (
     "plainly — never invent sensor values, people, thresholds, or procedures. "
     "Format with short Markdown: **bold** for key values, bullet lists for "
     "multiple items. When you cite a reading, include its units and, if known, "
-    "how it compares to the threshold."
+    "how it compares to the threshold. All timestamps in the snapshot are already "
+    "in Europe/Madrid local time — present times to the operator in that zone."
 )
 
 _NO_KEY_REPLY = (
@@ -63,8 +74,16 @@ def _clip(text: Any, limit: int = _TEXT_CLIP) -> str:
 
 
 def _fmt_ts(value: Any) -> str:
+    """Render a timestamp in Europe/Madrid local time (the app-wide display zone).
+    Stored values are UTC; a naive datetime is assumed UTC. Falls back to the raw
+    UTC value if the tz database isn't available."""
     if isinstance(value, datetime):
-        return value.isoformat(timespec="seconds")
+        dt = value
+        if _DISPLAY_TZ is not None:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.astimezone(_DISPLAY_TZ)
+        return dt.isoformat(timespec="seconds")
     return str(value) if value else "n/a"
 
 

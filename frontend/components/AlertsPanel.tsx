@@ -9,12 +9,13 @@ import { EmptyRow } from "@/components/ui/Spinner";
 import {
   SEVERITY_DOT,
   STATUS_BADGE,
+  statusLabel,
   detectionMethodBadge,
   detectionMethodLabel,
   relativeTime,
 } from "@/lib/format";
 
-const ACTIVE = new Set(["unresolved", "analyzed", "assigned"]);
+const ACTIVE = new Set(["unresolved", "processing", "analyzed", "assigned"]);
 
 export function AlertsPanel({ anomalies }: { anomalies: Anomaly[] }) {
   const active = anomalies.filter((a) => ACTIVE.has(a.status));
@@ -88,7 +89,7 @@ export function AlertsPanel({ anomalies }: { anomalies: Anomaly[] }) {
                       STATUS_BADGE[a.status]
                     )}
                   >
-                    {a.status}
+                    {statusLabel(a.status)}
                   </span>
                 </td>
                 <td className="px-4 py-2.5 text-xs text-mongo-mist">

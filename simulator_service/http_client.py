@@ -15,7 +15,7 @@ import requests
 
 # Anomaly statuses that mean "still open" — the simulator keeps a sensor's breach
 # held until none of its anomalies are in one of these (i.e. it was resolved).
-_OPEN_STATUSES = frozenset({"unresolved", "analyzed", "assigned"})
+_OPEN_STATUSES = frozenset({"unresolved", "processing", "analyzed", "assigned"})
 
 
 def post_telemetry(base_url: str, payload: dict[str, Any], timeout_seconds: float = 5.0) -> None:

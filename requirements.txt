@@ -1,6 +1,7 @@
 pymongo
 python-dotenv
 certifi
+tzdata  ; platform_system == "Windows"  # IANA tz database for zoneinfo (Europe/Madrid display)
 fastapi
 uvicorn
 pydantic

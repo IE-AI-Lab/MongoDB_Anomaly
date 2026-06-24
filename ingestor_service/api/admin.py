@@ -14,14 +14,14 @@ auth lands, this is the first route that should require it.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ..messaging import queue
 from ..core.db import col
-from ..detector import state
+from ..detector import detect, state
 from ..services import simulation_control
 
 router = APIRouter(tags=["admin"])
@@ -138,3 +138,36 @@ def set_sensor_stress(sensor_id: str, req: StressRequest) -> dict[str, Any]:
     if result.matched_count == 0:
         raise HTTPException(404, "sensor not found")
     return {"sensor_id": sensor_id, "sim_stress": req.sim_stress}
+
+
+# ---------------------------------------------------------------------------
+# Deterministic anomaly creation — the dashboard "Trigger anomaly" button. Forges
+# a real-looking threshold breach on a sensor and dispatches it to the agent,
+# bypassing the detector's debounce so it fires every time (demo/dev only).
+# ---------------------------------------------------------------------------
+
+
+class CreateAnomalyRequest(BaseModel):
+    sensor_id: Optional[str] = None  # default: the first active sensor
+
+
+@router.post("/simulation/anomaly")
+def create_anomaly(req: CreateAnomalyRequest) -> dict[str, Any]:
+    """Deterministically create one anomaly on a sensor (or the first active one)
+    and dispatch it to the agent, exactly like a detector-fired threshold breach."""
+    if req.sensor_id:
+        sensor = col("sensors").find_one({"sensor_id": req.sensor_id})
+    else:
+        sensor = col("sensors").find_one({"is_active": True})
+    if not sensor:
+        raise HTTPException(404, "sensor not found")
+
+    anomaly = detect.create_manual_anomaly(sensor)
+    return {
+        "anomaly_id": anomaly["anomaly_id"],
+        "sensor_id": anomaly["sensor_id"],
+        "error_code": anomaly["error_code"],
+        "severity_type": anomaly["severity_type"],
+        "severity_level": anomaly["severity_level"],
+        "status": anomaly["status"],
+    }

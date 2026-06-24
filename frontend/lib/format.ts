@@ -40,10 +40,22 @@ export const SEVERITY_DOT: Record<SeverityType, string> = {
 
 export const STATUS_BADGE: Record<AnomalyStatus, string> = {
   unresolved: "bg-severity-high text-severity-highInk",
+  processing: "bg-[#FEF3C7] text-[#92580C]",
   analyzed: "bg-mongo-green-tint text-mongo-green-dark",
   assigned: "bg-[#E1F7FF] text-[#095896]",
   resolved: "bg-mongo-border text-mongo-slate",
 };
+
+// Human labels for anomaly statuses. `processing` reads as "In progress".
+export const STATUS_LABEL: Record<AnomalyStatus, string> = {
+  unresolved: "Unresolved",
+  processing: "In progress",
+  analyzed: "Analyzed",
+  assigned: "Assigned",
+  resolved: "Resolved",
+};
+
+export const statusLabel = (s: AnomalyStatus): string => STATUS_LABEL[s] ?? s;
 
 export const ROLE_LABEL: Record<string, string> = {
   staff: "Staff",
@@ -64,18 +76,41 @@ export const detectionMethodLabel = (m?: string) =>
 export const detectionMethodBadge = (m?: string) =>
   (m && DETECTION_METHOD_META[m]?.badge) || "bg-mongo-border text-mongo-slate";
 
+// The whole app renders timestamps in Spain/Madrid local time. Backend stores &
+// returns UTC (ISO with Z); we convert at the display layer only. Europe/Madrid is
+// DST-aware (CEST = UTC+2 in summer, CET = UTC+1 in winter), so it stays correct
+// year-round regardless of where the operator's browser is.
+export const APP_TIME_ZONE = "Europe/Madrid";
+
+// Backend timestamps come from PyMongo *naive* (no tz offset), e.g.
+// "2026-06-23T14:06:00". JS parses a tz-less ISO string as LOCAL time, which
+// shifts UTC values by the viewer's offset (the "2h ago for something just
+// created" bug). Treat any tz-less timestamp as UTC by appending "Z", then the
+// APP_TIME_ZONE conversion shows correct Madrid time. Strings that already carry
+// a zone ("…Z" / "+02:00") are left untouched.
+function toDate(iso: string): Date {
+  const hasZone = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(iso);
+  return new Date(hasZone || !iso.includes("T") ? iso : `${iso}Z`);
+}
+
 export function formatTime(iso?: string): string {
   if (!iso) return "—";
-  const d = new Date(iso);
+  const d = toDate(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return d.toLocaleTimeString([], {
+    timeZone: APP_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 export function formatDateTime(iso?: string): string {
   if (!iso) return "—";
-  const d = new Date(iso);
+  const d = toDate(iso);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleString([], {
+    timeZone: APP_TIME_ZONE,
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -85,7 +120,7 @@ export function formatDateTime(iso?: string): string {
 
 export function relativeTime(iso?: string): string {
   if (!iso) return "—";
-  const then = new Date(iso).getTime();
+  const then = toDate(iso).getTime();
   if (Number.isNaN(then)) return "—";
   const secs = Math.round((Date.now() - then) / 1000);
   if (secs < 60) return `${secs}s ago`;

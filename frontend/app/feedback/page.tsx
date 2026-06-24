@@ -12,13 +12,14 @@ import { AssignWorker } from "@/components/AssignWorker";
 import { FeedbackForm } from "@/components/FeedbackForm";
 import {
   STATUS_BADGE,
+  statusLabel,
   breachPhrase,
   formatDateTime,
   metricLabel,
 } from "@/lib/format";
 
-// Reports worth reviewing: anything not yet resolved (open/analyzed/assigned).
-const ACTIVE = new Set(["unresolved", "analyzed", "assigned"]);
+// Reports worth reviewing: anything not yet resolved (open/processing/analyzed/assigned).
+const ACTIVE = new Set(["unresolved", "processing", "analyzed", "assigned"]);
 
 function similarCaseText(c: SimilarCase | string): { title: string; body: string } {
   if (typeof c === "string") return { title: "Similar case", body: c };
@@ -113,7 +114,7 @@ export default function FeedbackPage() {
                             STATUS_BADGE[r.status]
                           )}
                         >
-                          {r.status === "unresolved" ? "open" : r.status}
+                          {r.status === "unresolved" ? "open" : statusLabel(r.status)}
                         </span>
                       </div>
                     </button>
@@ -180,7 +181,7 @@ function ReportDetail({
                 STATUS_BADGE[anomaly.status]
               )}
             >
-              {anomaly.status}
+              {statusLabel(anomaly.status)}
             </span>
           </div>
 

@@ -14,6 +14,7 @@ import { AgentTrace } from "@/components/AgentTrace";
 import {
   SEVERITY_BADGE,
   STATUS_BADGE,
+  statusLabel,
   detectionMethodBadge,
   detectionMethodLabel,
   formatDateTime,
@@ -99,7 +100,7 @@ export default function ReportPage() {
                 STATUS_BADGE[anomaly.status]
               )}
             >
-              {anomaly.status}
+              {statusLabel(anomaly.status)}
             </span>
             <span className="font-mono text-xs text-mongo-slate">{anomaly.error_code}</span>
             {anomaly.detection_method && (

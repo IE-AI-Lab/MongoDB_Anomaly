@@ -147,7 +147,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 ```bash
 uvicorn ingestor_service.app:app --reload --host 0.0.0.0 --port 8000   # API
 python -m agent_worker.main                                            # agent worker
-python -m simulator_service.main --base-url http://127.0.0.1:8000 --deterministic-demo   # one anomaly ~every 2 min
+python -m simulator_service.main --base-url http://127.0.0.1:8000 --deterministic-demo   # demo: high degradation rate, trips anomalies promptly
 cd frontend && npm install && npm run dev                              # dashboard
 ```
 

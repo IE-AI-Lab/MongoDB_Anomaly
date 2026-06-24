@@ -19,11 +19,14 @@ from ..services.feedback_to_knowledge import embed_resolution_into_knowledge
 router = APIRouter(tags=["write"])
 
 
-# Anomaly status lifecycle: unresolved -> analyzed -> assigned -> resolved.
-# These ranks let us enforce forward-only transitions. `assigned` and `resolved`
-# are reachable ONLY through their dedicated endpoints (which carry side effects:
-# flipping staff on-call state and closing the RAG loop), never via a raw PATCH.
-VALID_STATUSES: tuple[str, ...] = ("unresolved", "analyzed", "assigned", "resolved")
+# Anomaly status lifecycle: unresolved -> processing -> analyzed -> assigned -> resolved.
+# `processing` is set by the agent worker while its graph is actively investigating
+# (between picking the job up and committing the analysis), so the UI can show
+# "In progress" instead of "Unresolved". These ranks enforce forward-only
+# transitions. `assigned` and `resolved` are reachable ONLY through their dedicated
+# endpoints (which carry side effects: flipping staff on-call state and closing the
+# RAG loop), never via a raw PATCH — but `processing` and `analyzed` are PATCHable.
+VALID_STATUSES: tuple[str, ...] = ("unresolved", "processing", "analyzed", "assigned", "resolved")
 _STATUS_RANK: dict[str, int] = {s: i for i, s in enumerate(VALID_STATUSES)}
 
 

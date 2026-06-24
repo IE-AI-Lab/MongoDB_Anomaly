@@ -105,6 +105,27 @@ def _metric_base(metric_name: str) -> str:
     return _METRIC_BASE.get(metric_name, "METRIC")
 
 
+# Primary alarm-bearing metric per metric_type (mirrors _extract_metric_candidates
+# and the simulator's PROFILES). The manual "Trigger anomaly" button forces a
+# breach on this metric.
+_PRIMARY_METRIC: dict[str, str] = {
+    "environment": "temp_celsius",
+    "vibration": "amplitude_mm",
+    "pressure": "pressure_bar",
+    "flow": "flow_rate_lpm",
+}
+
+# Fallback limit/direction when no system_metadata threshold is configured for a
+# metric (mirrors the seeded ball-mill thresholds in scripts/init_db.py).
+_FALLBACK_THRESHOLD: dict[str, tuple[float, str]] = {
+    "temp_celsius": (70.0, "above"),
+    "humidity_percent": (80.0, "above"),
+    "amplitude_mm": (7.1, "above"),
+    "pressure_bar": (4.5, "below"),
+    "flow_rate_lpm": (12.0, "below"),
+}
+
+
 # --- rate-of-change detector -------------------------------------------------
 
 def _rate_of_change(prev: float, current: float, min_baseline: float) -> Optional[float]:
@@ -195,6 +216,85 @@ def _persist_and_dispatch(
 
     dispatch_anomaly(anomaly_doc)
     return anomaly_doc
+
+
+def create_manual_anomaly(
+    sensor_doc: dict[str, Any], *, observed: Optional[float] = None
+) -> dict[str, Any]:
+    """Deterministically create + dispatch one threshold anomaly for a sensor.
+
+    Bypasses the detector's debounce/arm state so it fires every time — this is
+    the path behind the UI "Trigger anomaly" button. The result is shaped exactly
+    like a real threshold breach (same fields, same dispatch path), so the agent
+    and the anomaly lifecycle treat it identically. A single over-limit telemetry
+    point is also persisted so the dashboard chart shows the spike even when the
+    simulator is paused.
+    """
+    sensor_id = sensor_doc.get("sensor_id")
+    if not sensor_id:
+        raise ValueError("sensor_doc is missing sensor_id")
+
+    metric_type = sensor_doc.get("metric_type", "")
+    metric_name = _PRIMARY_METRIC.get(metric_type)
+    if metric_name is None:
+        raise ValueError(f"no primary metric known for metric_type {metric_type!r}")
+
+    threshold = get_threshold(sensor_id, metric_name)
+    if threshold is None:
+        limit, direction = _FALLBACK_THRESHOLD[metric_name]
+        threshold = Threshold(metric_name, direction, limit, 1)  # type: ignore[arg-type]
+
+    # Deterministic over-limit value ~25% past the limit → "high" severity.
+    if observed is None:
+        factor = 1.25 if threshold.direction == "above" else 0.75
+        observed = round(threshold.limit * factor, 4)
+
+    now = utc_now()
+    telemetry_doc: dict[str, Any] = {
+        "timestamp_utc": now,
+        "sensor_id": sensor_id,
+        "facility_id": sensor_doc.get("facility_id"),
+        "equipment_id": sensor_doc.get("equipment_id"),
+        "ingested_at_utc": now,
+        "source": "manual",
+        "quality": "good",
+        "reading": {
+            "metric_type": metric_type,
+            "unit_system": "si",
+            metric_name: observed,
+        },
+        "event_id": f"manual-{uuid4()}",
+    }
+    # Persist the breach reading so the chart shows it immediately. Insert a copy
+    # — a time-series insert mutates the doc with an _id we don't want downstream.
+    col("telemetry_history").insert_one(dict(telemetry_doc))
+
+    # Mirror a real detector fire: disarm the threshold counter so the breach the
+    # simulator now sustains (it holds any sensor with an open anomaly) doesn't
+    # produce a *second*, detector-created anomaly. It re-arms when a reading
+    # returns to the normal side of the limit.
+    counter = get_counter(sensor_id, metric_name)
+    counter.threshold_armed = False
+    counter.consecutive_violations = max(
+        counter.consecutive_violations, threshold.consecutive_required
+    )
+
+    severity_fields = build_anomaly_severity_fields(
+        observed=observed, limit=threshold.limit, direction=threshold.direction
+    )
+    return _persist_and_dispatch(
+        telemetry_doc=telemetry_doc,
+        metric_name=metric_name,
+        value=observed,
+        error_code=_error_code(metric_name, threshold),
+        detection_method="threshold",
+        severity_fields=severity_fields,
+        trigger_value={
+            "limit": threshold.limit,
+            "unit": "si",
+            "consecutive_count": threshold.consecutive_required,
+        },
+    )
 
 
 def _check_threshold(

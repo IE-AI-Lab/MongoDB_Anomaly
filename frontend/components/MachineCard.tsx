@@ -70,6 +70,45 @@ function StressSlider({ sensor }: { sensor: Sensor }) {
   );
 }
 
+// Deterministically create an anomaly on this machine (demo/dev affordance).
+// Disabled while one is already active — the dashboard's poll will flag the card
+// and fire the alert toast within a few seconds, no manual refresh needed.
+function TriggerAnomalyButton({
+  sensor,
+  disabled,
+}: {
+  sensor: Sensor;
+  disabled?: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  const onClick = async () => {
+    setBusy(true);
+    try {
+      await api.createAnomaly(sensor.sensor_id);
+    } catch (e) {
+      window.alert(`Could not create anomaly: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={busy || disabled}
+      title={
+        disabled
+          ? "This machine already has an active anomaly"
+          : "Create a test anomaly on this machine"
+      }
+      className="inline-flex items-center gap-1 rounded-md border border-mongo-border px-2.5 py-1 text-[11px] font-medium text-mongo-slate transition-colors hover:bg-mongo-bg disabled:opacity-40"
+    >
+      {busy ? "Creating…" : "Trigger anomaly"}
+    </button>
+  );
+}
+
 export function MachineCard({ sensor, readings, thresholds, activeAnomaly }: Props) {
   const metrics = sensor.metrics ?? [];
 
@@ -142,6 +181,9 @@ export function MachineCard({ sensor, readings, thresholds, activeAnomaly }: Pro
 
       <div className="border-t border-mongo-border">
         <StressSlider sensor={sensor} />
+        <div className="flex justify-end px-4 pb-2.5">
+          <TriggerAnomalyButton sensor={sensor} disabled={flagged} />
+        </div>
       </div>
 
       {flagged && activeAnomaly && (

@@ -165,6 +165,18 @@ def test_answer_llm_error_is_graceful(fake_db, monkeypatch):
     assert out == chat_service._ERROR_REPLY
 
 
+def test_fmt_ts_renders_madrid_local_time():
+    from datetime import datetime, timezone
+
+    dt = datetime(2026, 6, 23, 12, 0, 0, tzinfo=timezone.utc)
+    out = chat_service._fmt_ts(dt)
+    if chat_service._DISPLAY_TZ is not None:
+        # Europe/Madrid is UTC+2 in June (CEST): 12:00Z → 14:00+02:00.
+        assert out == "2026-06-23T14:00:00+02:00"
+    else:  # tzdata unavailable → graceful UTC fallback
+        assert out == "2026-06-23T12:00:00+00:00"
+
+
 def test_router_returns_reply(monkeypatch):
     monkeypatch.setattr(routes_chat.chat_service, "answer", lambda message, history: f"echo:{message}")
     req = routes_chat.ChatRequest(message="hello", history=[{"role": "user", "content": "prior"}])

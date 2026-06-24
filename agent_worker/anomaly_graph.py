@@ -195,8 +195,26 @@ def fetch_anomaly_node(state: AgentState) -> AgentState:
 
 
 def route_status(state: AgentState) -> str:
+    # Process fresh jobs (unresolved) AND ones left mid-flight by a crashed worker
+    # (processing) so an at-least-once redelivery re-runs rather than orphaning the
+    # anomaly. Anything already past investigation (analyzed/assigned/resolved) is
+    # skipped idempotently.
     status = state["anomaly"].get("status", "unresolved")
-    return "process" if status == "unresolved" else "skip"
+    return "process" if status in ("unresolved", "processing") else "skip"
+
+
+@_traced("mark_processing")
+def mark_processing_node(state: AgentState) -> AgentState:
+    """Claim the anomaly as in-flight so the UI shows 'In progress' instead of
+    'Unresolved' while the (slow) investigation runs. Best-effort — a failed mark
+    must not abort the run; the final patch_anomaly still commits the analysis."""
+    anomaly_id = state["anomaly_id"]
+    try:
+        _client(state).patch(f"/anomalies/{anomaly_id}", {"status": "processing"})
+        log.info("marked anomaly %s processing", anomaly_id)
+    except Exception as exc:  # noqa: BLE001 — marking is advisory, not load-bearing
+        log.warning("could not mark anomaly %s processing: %s", anomaly_id, exc)
+    return state
 
 
 @_traced("skip")
@@ -313,6 +331,7 @@ graph = StateGraph(AgentState)
 graph.add_node("start", start_node)
 graph.add_node("fetch_anomaly", fetch_anomaly_node)
 graph.add_node("skip", skip_node)
+graph.add_node("mark_processing", mark_processing_node)
 graph.add_node("fetch_sensor", fetch_sensor_node)
 graph.add_node("fetch_readings", fetch_readings_node)
 graph.add_node("investigation_agent", investigation_agent_node)
@@ -325,9 +344,10 @@ graph.add_edge("start", "fetch_anomaly")
 graph.add_conditional_edges(
     "fetch_anomaly",
     route_status,
-    {"process": "fetch_sensor", "skip": "skip"},
+    {"process": "mark_processing", "skip": "skip"},
 )
 graph.add_edge("skip", "finalize")
+graph.add_edge("mark_processing", "fetch_sensor")
 graph.add_edge("fetch_sensor", "fetch_readings")
 graph.add_edge("fetch_readings", "investigation_agent")
 graph.add_edge("investigation_agent", "analyze")
